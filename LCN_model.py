@@ -655,7 +655,6 @@ class LCN(nn.Module):
         
         # Create list of angles between -pi/2 and pi/2
         x = np.linspace(-np.pi/2, np.pi/2, self.tuning_curve_sample)
-        x = (x * 180) / np.pi
         
         # Initialise tensor for all tuning curves after training, organized into orientations, horizontal position, vertical position, tuning curve data
         self.v4_results = torch.empty(self.v4_orientation_number, self.v4_dimensions, self.v4_dimensions, len(x))
