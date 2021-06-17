@@ -1040,7 +1040,6 @@ class LCN(nn.Module):
             self.v1_mean_after_slopes.append(mean_after_slope)
             self.v1_mean_before_slopes.append(mean_before_slope)
         
-            
         self.v4_after_slopes = []
         self.v4_before_slopes = []
         
@@ -1074,7 +1073,7 @@ class LCN(nn.Module):
         """
         Plots slopes of orientation tuning curves against difference between trained angle and preferred angle.  
         """
-        
+       
         plt.plot(self.v1_before_range, self.v1_mean_before_slopes)
         plt.plot(self.v1_after_range, self.v1_mean_after_slopes)
         
