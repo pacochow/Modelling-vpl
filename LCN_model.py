@@ -571,6 +571,18 @@ class LCN(nn.Module):
                                 self.results[orientation][sf][horizontal][vertical][i] = result
                                 self.initial_tuning_curves[orientation][sf][horizontal][vertical][i] = initial_result
                         
+        
+        for j in range(self.phis_sfs):
+            if torch.abs(self.results[:, j].max()) > torch.abs(self.results[:, j].min()):
+                self.results[:, j] = self.results[:, j] / self.results[:, j].max()
+                self.initial_tuning_curves[:, j] = self.initial_tuning_curves[:, j] / self.initial_tuning_curves[:, j].max()
+
+            else:
+                self.results[:, j, :, :, :] = self.results[:, j, :, :, :] / self.results[:, j, :, :, :].min()
+                self.initial_tuning_curves[:, j, :, :, :] = self.initial_tuning_curves[:, j, :, :, :] / self.initial_tuning_curves[:, j, :, :, :].min()
+                        
+                        
+                    
     def plot_v1_tuning_curve(self, orientation, phi_sf, position, orientations = False, phi_sfs = False, differences = False):
         
         """
@@ -699,12 +711,15 @@ class LCN(nn.Module):
                 # Store measured activity of each filter in tensor
                 self.v4_results[:, :, :, i] = v4_pool_after
                 self.v4_initial_tuning_curves[:, :, :, i] = v4_pool_before
-
+                       
+        self.v4_results = self.v4_results / self.v4_results.max()
+        self.v4_initial_tuning_curves = self.v4_initial_tuning_curves / self.v4_initial_tuning_curves.max()
+                       
     def plot_v4_tuning_curve(self, position, differences = False):
         
         """
-        Plot tuning curves at a particular orientation index and at a particular filter position. Setting differences = True plots 
-        difference in responses using initial V1 simple cell weights and trained weights. 
+        Plot tuning curves at a particular orientation index and at a particular filter position. Setting differences = True 
+        plots difference in responses using initial V1 simple cell weights and trained weights. 
         """
         
         # Create list of angles between -pi/2 and pi/2
@@ -764,7 +779,7 @@ class LCN(nn.Module):
                 
                 # Set tuning curve at particular orientation, phase/sf and position after training
                 curve = self.results[i, j, position, position, :]
-                
+
                 # Measure amplitude using max and min of tuning curve
                 amplitude = curve.max() - curve.min()
                 self.after_amplitudes.append(amplitude)
