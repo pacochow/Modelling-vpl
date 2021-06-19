@@ -128,8 +128,8 @@ class LCN(nn.Module):
                 for i in range(self.v4_dimensions):
                     for j in range(self.v4_dimensions):
                         kernel = self.generate_3d_gaussian(mean = angles[pool_orientation], spatial_std = 0.5, orientation_std = 0.15)[orientation] 
-                        # Add random noise from normal distribution
-                        noise = torch.normal(0, 0.015, (self.v4_size, self.v4_size)) 
+                        # Add random noise from normal distribution scaled by mean of each gaussian filter so noise does not cover up gaussian
+                        noise = torch.normal(0, 0.015, (self.v4_size, self.v4_size)) * kernel.mean() 
                         kernel = kernel + noise
                         v4[pool_orientation][orientation][i][j] = kernel
         return v4
@@ -570,8 +570,8 @@ class LCN(nn.Module):
                                 # Save activity in tensor
                                 self.results[orientation][sf][horizontal][vertical][i] = result
                                 self.initial_tuning_curves[orientation][sf][horizontal][vertical][i] = initial_result
-                        
-        
+
+        # Normalize tuning curves to – divide by maximum point on curve if tuning curve is positive and minimum point if tuning curve is negative 
         for j in range(self.phis_sfs):
             if torch.abs(self.results[:, j].max()) > torch.abs(self.results[:, j].min()):
                 self.results[:, j] = self.results[:, j] / self.results[:, j].max()
@@ -712,6 +712,7 @@ class LCN(nn.Module):
                 self.v4_results[:, :, :, i] = v4_pool_after
                 self.v4_initial_tuning_curves[:, :, :, i] = v4_pool_before
                        
+        # Normalize tuning curves
         self.v4_results = self.v4_results / self.v4_results.max()
         self.v4_initial_tuning_curves = self.v4_initial_tuning_curves / self.v4_initial_tuning_curves.max()
                        
@@ -1137,12 +1138,30 @@ class LCN(nn.Module):
         """
         
         ksize = size # Size of gabor filter
-        sigma = 2 # Standard deviation of Gaussian envelope
+        sigma = 1.6 # Standard deviation of Gaussian envelope
         if random_sf == True:
             lamda = np.random.uniform(1.1, 13) # Wavelength of sinusoidal component so determines sf
         gamma = 0.5 # Spatial aspect ratio and ellipticity 
         kernel = cv2.getGaborKernel((ksize, ksize), sigma, theta, lamda, gamma, phi)
         return torch.tensor(kernel).view(1, 1, size, size).float()
+    
+    def generate_location_gabor(self, theta, phi, lamda, x_location, y_location, random_sf = False):
+        
+        """
+        Generates one gabor matrix in a specific location. Takes in angle, phase, spatial frequency, x and y coordinates as 
+        arguments and returns a torch tensor gabor matrix. Setting random_sf = True creates a gabor with a random spatial 
+        frequency.
+        """
+        
+        # Generate gabor and noise
+        kernel = self.generate_gabor(self.simple_size, theta, phi, lamda, random_sf = random_sf)
+        kernel_noise = torch.normal(0, 0.03, (self.input_size, self.input_size))
+        
+        # Add gabor to noise at particular location
+        for i in range(ksize):
+            for j in range(ksize):
+                kernel_noise[ksize + x_location][ksize + y_location] = kernel[i][j] + kernel_noise[ksize + x_location][ksize + y_location]
+        return kernel_noise
     
     def generate_gaussian(self, mean, std, kernlen):
         
@@ -1153,7 +1172,6 @@ class LCN(nn.Module):
         n = torch.linspace(-np.pi/2, np.pi/2, kernlen) - mean
         sig2 = 2 * std * std
         w = torch.exp(-n ** 2 / sig2)
-        
         return w
     
     def generate_3d_gaussian(self, mean, spatial_std, orientation_std):
@@ -1240,7 +1258,8 @@ class LCN(nn.Module):
     def sort_lists(self, list1, list2):
         
         """
-        Takes in 2 lists as arguments and sorts them in parallel based on first list in ascending order 
+        Takes in 2 lists as arguments and sorts them in parallel based on first list in ascending order. Returns tuple of sorted 
+        lists. 
         """
         
         zipped_lists = zip(list1, list2)
