@@ -176,7 +176,6 @@ class LCN(nn.Module):
         # Stack all input gabor stimuli into one tensor
         self.input = torch.stack(self.inputs).view(self.training_size, 1, self.input_size, self.input_size)#.to(self.device) 
         return self.input
-
     
     def desired_outputting(self):
         
@@ -446,15 +445,16 @@ class LCN(nn.Module):
         
         # Create list of angles between 0 and pi/2
         angles = self.remove_ambiguous_stimuli(0, np.pi/2, number, even_space = False)
-        scores = []
+        self.angle_scores = []
         
         # For each angle, calculate generalization performance on 50 gabors with orientations between -angle and angle
         for i in range(number):
-            self.generalization(angles[i], 50)
-            scores.append(self.generalization_score)
+            self.generalization(angles[i], 2)
+#             print((180*angles[i])/np.pi, self.generalization_score)
+            self.angle_scores.append(self.generalization_score)
             
         # Plot performance on each angle
-        plt.plot((180 * angles)/np.pi, scores, color = color)
+        plt.plot((180 * angles)/np.pi, self.angle_scores, color = color)
         plt.xlabel("Separation angle (Degrees)")
         plt.ylabel("Performance (%)")
 
@@ -517,10 +517,13 @@ class LCN(nn.Module):
         
         if v1 == True:
             plt.plot(self.before_v1weights, color = color)
+            plt.title("Weight changes in V1 during training");
         if v4 == True:
             plt.plot(self.before_v4weights, color = color)
+            plt.title("Weight changes in V4 during training");
         if decision == True:
             plt.plot(self.before_decision_weights, color = color)
+            plt.title("Weight changes in decision layer during training");
         plt.xlabel("Time (epochs)")
         plt.ylabel("Weight change")
     
@@ -609,6 +612,7 @@ class LCN(nn.Module):
             plt.legend([round(ranges[i], 1) for i in range(self.simple_number)])
             
             plt.ylabel("Response")
+            plt.title("V1 tuning curves selective for different orientations", loc = 'center')
                 
         if phi_sfs == True and differences == False:
             
@@ -621,6 +625,7 @@ class LCN(nn.Module):
             plt.legend([round(ranges[i], 1) for i in range(self.phis_sfs)])
             
             plt.ylabel("Response")
+            plt.title("V1 tuning curves selective for different phase/SFs", loc = 'center');
             
         if orientations == True and differences == True:
             
@@ -637,6 +642,7 @@ class LCN(nn.Module):
             plt.legend([round(ranges[i], 1) for i in range(self.simple_number)])
             
             plt.ylabel("Difference in response")
+            plt.title("Difference in V1 tuning curves selective for different orientations", loc = 'center');
             
         
         if phi_sfs == True and differences == True:
@@ -653,6 +659,7 @@ class LCN(nn.Module):
             plt.legend([round(ranges[i], 1) for i in range(self.phis_sfs)])
             
             plt.ylabel("Difference in response")
+            plt.title("Difference in V1 tuning curves selective for different phase/SFs", loc = 'center');
         
         plt.xlabel("Angle (Degrees)")
         
@@ -685,24 +692,37 @@ class LCN(nn.Module):
                 # Forward pass through V1 
                 out = test.unfold(2, self.simple_size, 1).unfold(3, self.simple_size, 1)
                 out = out.reshape(1, 1, self.dimensions, self.dimensions, self.simple_size * self.simple_size)
-                out = (out.unsqueeze(1) * self.simple_weight).sum([2, -1])
-                pools = []
+                out_after = (out.unsqueeze(1) * self.simple_weight).sum([2, -1])
+                out_before = (out.unsqueeze(1) * self.before_v1weight).sum([2, -1])
+                pools_after = []
+                pools_before = []
                 for j in range(0, self.simple_number*self.phis_sfs, self.phis_sfs):
-                    relu = F.relu(out[0][j:j+self.phis_sfs])
-                    pool = (torch.sum(relu, dim = 0)/(self.phis_sfs*200)).view(1, self.dimensions, self.dimensions)
-                    pools.append(pool)
-                pools = torch.stack(pools).view(self.simple_number, self.dimensions, self.dimensions)
+                    relu_after = F.relu(out_after[0][j:j+self.phis_sfs])
+                    pool = (torch.sum(relu_after, dim = 0)/(self.phis_sfs*200)).view(1, self.dimensions, self.dimensions)
+                    pools_after.append(pool)
+                    
+                    relu_before = F.relu(out_before[0][j:j+self.phis_sfs])
+                    pool = (torch.sum(relu_before, dim = 0)/(self.phis_sfs*200)).view(1, self.dimensions, self.dimensions)
+                    pools_before.append(pool)
+                
+                pools_after = torch.stack(pools_after).view(self.simple_number, self.dimensions, self.dimensions)
+                pools_before = torch.stack(pools_before).view(self.simple_number, self.dimensions, self.dimensions)
+                
                 v4_pools_after = []
                 v4_pools_before = []
                     
                 # Forward pass through V4 
-                out = pools.unfold(1, self.v4_size, self.v4_stride).unfold(2, self.v4_size, self.v4_stride)
-                out = out.reshape(self.simple_number, self.v4_dimensions, self.v4_dimensions, self.v4_size * self.v4_size)
+                out_a = pools_after.unfold(1, self.v4_size, self.v4_stride).unfold(2, self.v4_size, self.v4_stride)
+                out_a = out_a.reshape(self.simple_number, self.v4_dimensions, self.v4_dimensions, self.v4_size * self.v4_size)
+                
+                out_b = pools_before.unfold(1, self.v4_size, self.v4_stride).unfold(2, self.v4_size, self.v4_stride)
+                out_b = out_b.reshape(self.simple_number, self.v4_dimensions, self.v4_dimensions, self.v4_size * self.v4_size)
+                
                 for k in range(self.v4_orientation_number):
-                    out_after = (out*self.v4_weight[k]).sum([-1, 0])
+                    out_after = (out_a*self.v4_weight[k]).sum([-1, 0])
                     v4_pools_after.append(out_after)
                     
-                    out_before = (out*self.before_v4weight[k]).sum([-1, 0])
+                    out_before = (out_b*self.before_v4weight[k]).sum([-1, 0])
                     v4_pools_before.append(out_before)
                 
                 v4_pool_after = torch.stack(v4_pools_after).view(self.v4_orientation_number, self.v4_dimensions, self.v4_dimensions)
@@ -740,6 +760,7 @@ class LCN(nn.Module):
             
             plt.legend([round(ranges[i], 1) for i in range(self.v4_orientation_number)])
             plt.ylabel("Response")
+            plt.title("V4 tuning curves selective for different orientations", loc = 'center');
 
         if differences == True:
 
@@ -752,6 +773,7 @@ class LCN(nn.Module):
             
             plt.legend([round(ranges[i], 1) for i in range(self.v4_orientation_number)])
             plt.ylabel("Difference in response")
+            plt.title("Difference in V4 tuning curves selective for different orientations", loc = 'center');
 
         plt.xlabel("Angle (Degrees)")
     
@@ -1126,7 +1148,72 @@ class LCN(nn.Module):
         plt.legend(["V1 difference", "V4 difference"])
         plt.xlabel("Absolute difference between preferred orientation and trained orientation (Degrees)")
         plt.ylabel("Difference between slope at trained orientation before and after training (Change/Degrees)")
+     
+    def transfer_inputting(self, angle1, angle2, x_location, y_location, random_sf):
         
+        """
+        Creates gabor filters at particular location to train network with. Takes in two angles that give the range of 
+        orientation of gabors and a Boolean random_sf to determine if spatial frequency of gabors is randomized. Returns a torch 
+        tensor consisting of all the training gabors. 
+        """
+        
+        self.labels = []
+        self.inputs = []
+    
+        self.transfer_angle1 = angle1
+        self.transfer_angle2 = angle2
+        
+        # Create list of orientations for input gabor stimuli
+        x = self.remove_ambiguous_stimuli(angle1, angle2, self.training_size, even_space = False) 
+
+        # For each orientation, create input gabor stimulus at that orientation at particular location
+        for i in range(self.training_size):
+            theta = x[i]
+            phi = np.random.uniform(0, np.pi) # Randomize phase of input stimuli
+            kernel = self.generate_location_gabor(theta, phi, 5, x_location, y_location, random_sf = random_sf) 
+            self.inputs.append(kernel)
+            
+            # Label stimulus as 0 if it is clockwise to reference orientation of 0 and 1 if counterclockwise
+            if 0 < theta < np.pi/2: 
+                label = torch.tensor([0])
+            else:
+                label = torch.tensor([1])
+            self.labels.append(label)
+            
+        # Stack all input gabor stimuli into one tensor
+        self.input = torch.stack(self.inputs).view(self.training_size, 1, self.input_size, self.input_size)#.to(self.device) 
+        return self.input
+    
+    def transfer_test(self, x_location, y_location):
+        
+        """
+        Creates test gabors at new location using the same angle trained on and calculates performance of network. Takes in x and 
+        y coordinates of gabor location as arguments.
+        """
+        
+        transfer_score = 0
+        
+        # Create list of orientations for input gabor stimuli
+        x = self.remove_ambiguous_stimuli(self.transfer_angle1, self.transfer_angle2, self.training_size, even_space = False)
+        
+        # For each orientation, create input gabor stimulus at that orientation at particular location
+        for i in range(self.training_size):
+            theta = x[i]
+            kernel = self.generate_location_gabor(theta, 0, 5, x_location, y_location, random_sf = False)
+            
+            # Label stimulus as 0 if it is clockwise to reference orientation of 0 and 1 if counterclockwise
+            if 0 < theta < np.pi/2: 
+                label = torch.tensor([0])
+            else:
+                label = torch.tensor([1])
+        
+            with torch.no_grad():
+                a = self.forward(kernel)
+                if torch.argmax(a) == label:
+                    transfer_score += 1
+        
+        # Calculate transfer performance
+        self.transfer_score = transfer_score/test_size * 100
     
     # Helper functions
     
@@ -1219,9 +1306,9 @@ class LCN(nn.Module):
             # Add 0.1 to -pi/2 or 0 and subtract 0.5 to pi/2 or pi and repeat until no more ambiguous stimuli in list
             while ambiguous == True: 
                 for i in stimuli[0:2]:
-                    x = np.where(x == i, i+0.1, x)
+                    x = np.where(x == i, i+0.01, x)
                 for i in stimuli[2:4]:
-                    x = np.where(x == i, i-0.1, x)            
+                    x = np.where(x == i, i-0.01, x)            
                 x = np.linspace(x[0], x[-1], size)
                 if -np.pi/2 in x or 0 in x or np.pi/2 in x:
                     ambiguous = True
@@ -1235,9 +1322,9 @@ class LCN(nn.Module):
             # Add 0.1 to -pi/2 or 0 and subtract 0.5 to pi/2 or pi and repeat until no more ambiguous stimuli in list
             while ambiguous == True: 
                 for i in stimuli[0:2]:
-                    x = np.where(x == i, i+0.1, x)
+                    x = np.where(x == i, i+0.01, x)
                 for i in stimuli[2:4]:
-                    x = np.where(x == i, i-0.1, x)            
+                    x = np.where(x == i, i-0.01, x)            
                 x = np.linspace(x[0], x[-1], size)
                 if -np.pi/2 in x or 0 in x or np.pi/2 in x:
                     ambiguous = True
