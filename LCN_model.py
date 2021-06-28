@@ -245,9 +245,9 @@ class LCN(nn.Module):
         number of iteractions. Calculates mean loss over batch size and optimizes over this loss. 
         """
         
-        self.before_v1weights = []
-        self.before_v4weights = []
-        self.before_decision_weights = []
+        self.v1_weight_changes = []
+        self.v4_weight_changes = []
+        self.decision_weight_changes = []
         
         self.losses = []
         self.training_scores = []
@@ -282,9 +282,9 @@ class LCN(nn.Module):
             self.training_scores.append(self.training_score)
             
             # Keep track of weight changes in each layer
-            self.before_v1weights.append(self.v1_weight_change(self.before_v1weight, self.simple_weight)) 
-            self.before_v4weights.append(self.v4_weight_change(self.before_v4weight, self.v4_weight)) 
-            self.before_decision_weights.append(self.decision_weight_change(self.before_decision_weight, self.decision.weight))
+            self.v1_weight_changes.append(self.v1_weight_change(self.before_v1weight, self.simple_weight)) 
+            self.v4_weight_changes.append(self.v4_weight_change(self.before_v4weight, self.v4_weight)) 
+            self.decision_weight_changes.append(self.decision_weight_change(self.before_decision_weight, self.decision.weight))
             
             # Backpropagate error and update weights
             loss.backward() 
@@ -303,9 +303,9 @@ class LCN(nn.Module):
         gabors between -test_angle and test_angle to see how well it generalizes. 
         """
         
-        self.before_v1weights = []
-        self.before_v4weights = []
-        self.before_decision_weights = []
+        self.v1_weight_changes = []
+        self.v4_weight_changes = []
+        self.decision_weight_changes = []
         
         self.losses = []
         self.training_scores = []
@@ -353,9 +353,9 @@ class LCN(nn.Module):
                 self.generalize_perform.append(self.generalization_score)
 
                 # Keep track of weight changes in each layer
-                self.before_v1weights.append(self.v1_weight_change(self.before_v1weight, self.simple_weight))
-                self.before_v4weights.append(self.v4_weight_change(self.before_v4weight, self.v4_weight))
-                self.before_decision_weights.append(self.decision_weight_change(self.before_decision_weight, self.decision.weight))
+                self.v1_weight_changes.append(self.v1_weight_change(self.before_v1weight, self.simple_weight))
+                self.v4_weight_changes.append(self.v4_weight_change(self.before_v4weight, self.v4_weight))
+                self.decision_weight_changes.append(self.decision_weight_change(self.before_decision_weight, self.decision.weight))
 
                 # Backpropagate error and update weights
                 loss.backward()
@@ -523,13 +523,13 @@ class LCN(nn.Module):
         """
         
         if v1 == True:
-            plt.plot(self.before_v1weights, color = color)
+            plt.plot(self.v1_weight_changes, color = color)
             plt.title("Weight changes in V1 during training");
         if v4 == True:
-            plt.plot(self.before_v4weights, color = color)
+            plt.plot(self.v4_weight_changes, color = color)
             plt.title("Weight changes in V4 during training");
         if decision == True:
-            plt.plot(self.before_decision_weights, color = color)
+            plt.plot(self.decision_weight_changes, color = color)
             plt.title("Weight changes in decision layer during training");
         plt.xlabel("Time (epochs)")
         plt.ylabel("Weight change")
