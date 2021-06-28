@@ -102,6 +102,7 @@ class LCN(nn.Module):
                         theta = angles[i]
                         lamda = self.phis_sfs_range[j]
                         kernel = self.generate_gabor(self.simple_size, theta, 0, lamda) 
+                        
                         # Add random noise from normal distribution
                         noise = torch.normal(0, 0.03, (self.simple_size, self.simple_size)) 
                         kernel = kernel + noise
@@ -119,15 +120,21 @@ class LCN(nn.Module):
         Initialize V4 weights with gaussian filters. Returns torch tensor weights.
         """
         # Create range of orientations between -pi/2 and pi/2 for each V4 filter
-        angles = self.remove_ambiguous_stimuli(-np.pi/2, np.pi/2, self.v4_orientation_number, even_space = True) 
-        
+        v1_angles = self.remove_ambiguous_stimuli(-np.pi/2, np.pi/2, self.simple_number, even_space = True)
+        v4_angles = self.remove_ambiguous_stimuli(-np.pi/2, np.pi/2, self.v4_orientation_number, even_space = True)
         # For each V4 orientation, create 3D V4 gaussian filter that has dimensions simple_number x v4_dimensions x v4_dimensions
         v4 = torch.empty(self.v4_orientation_number, self.simple_number, self.v4_dimensions, self.v4_dimensions, self.v4_size, self.v4_size) 
+        
         for pool_orientation in range(self.v4_orientation_number):
             for orientation in range(self.simple_number):
                 for i in range(self.v4_dimensions):
                     for j in range(self.v4_dimensions):
-                        kernel = self.generate_3d_gaussian(mean = angles[pool_orientation], spatial_std = 0.5, orientation_std = 0.15)[orientation] 
+                        # Find index in v1_angles using desired v4_angle to initialise preferred orientation of V4 orientation tuning curve
+                        index = self.find_nearest(torch.tensor(v1_angles), v4_angles[pool_orientation])
+                        
+                        # Generate 3D gaussian filter and roll the orientation gaussian to change the peaks
+                        kernel = self.generate_3d_gaussian(mean = v1_angles[int(round(self.simple_number/2, 0))], spatial_std = 0.5, orientation_std = 0.7, roll = (int(round(self.simple_number/2, 0)) - index - 1))[orientation] 
+                        
                         # Add random noise from normal distribution scaled by mean of each gaussian filter so noise does not cover up gaussian
                         noise = torch.normal(0, 0.015, (self.v4_size, self.v4_size)) * kernel.mean() 
                         kernel = kernel + noise
@@ -747,18 +754,14 @@ class LCN(nn.Module):
         x = np.linspace(-np.pi/2, np.pi/2, self.tuning_curve_sample)
         x = (x * 180) / np.pi
         
-        # Angles for legend
-        ranges = self.remove_ambiguous_stimuli(-np.pi/2, np.pi/2, self.v4_orientation_number, even_space = True)
-        ranges = (ranges * 180) / np.pi
-        
-        
         if differences == False:
             
             # Plot each tuning curve at different positions with specified position
             for i in range(self.v4_orientation_number):
                 plt.plot(x, self.v4_results[i, position, position, :])
             
-            plt.legend([round(ranges[i], 1) for i in range(self.v4_orientation_number)])
+            # Find preferred orientation of V4 curves for legend
+            plt.legend([round(x[self.v4_results[i][position][position][:].argmax()], 1) for i in range(self.v4_orientation_number)])
             plt.ylabel("Response")
             plt.title("V4 tuning curves selective for different orientations", loc = 'center');
 
@@ -771,7 +774,8 @@ class LCN(nn.Module):
             for i in range(self.v4_orientation_number):
                 plt.plot(x, difference[i, position, position, :])
             
-            plt.legend([round(ranges[i], 1) for i in range(self.v4_orientation_number)])
+            # Find preferred orientation of V4 curves for legend
+            plt.legend([round(x[self.v4_results[i][position][position][:].argmax()], 1) for i in range(self.v4_orientation_number)])
             plt.ylabel("Difference in response")
             plt.title("Difference in V4 tuning curves selective for different orientations", loc = 'center');
 
@@ -1261,7 +1265,7 @@ class LCN(nn.Module):
         w = torch.exp(-n ** 2 / sig2)
         return w
     
-    def generate_3d_gaussian(self, mean, spatial_std, orientation_std):
+    def generate_3d_gaussian(self, mean, spatial_std, orientation_std, roll):
         
         """
         Generates a simple_number x v4_size x v4_size 3D gaussian. Takes in mean and standard deviation of 
@@ -1278,11 +1282,17 @@ class LCN(nn.Module):
         twods = torch.stack(twod) 
         
         # Scaling each 2D gaussian at different orientations for orientation pooling using 1D gaussian
-        scale = self.generate_gaussian(mean, orientation_std, self.simple_number) 
-        scales = torch.empty(self.simple_number, self.v4_size, self.v4_size) 
-        for i in range(self.simple_number):
-            scales[i] = twods[i] * scale[i]
+        angles = self.remove_ambiguous_stimuli(-np.pi/2, np.pi/2, self.simple_number, even_space = True)
         
+        # Generate a 1D gaussian and roll the x-axis to change the peak
+        scale = self.generate_gaussian(mean, orientation_std, self.simple_number) 
+        a, b = self.sort_lists(np.roll(angles, roll), scale)
+        
+        scales = torch.empty(self.simple_number, self.v4_size, self.v4_size) 
+        
+        # Multiply each 2D gaussian by the orientation gaussian scalar
+        for i in range(self.simple_number):
+            scales[i] = twods[i] * b[i]
         # Return 3D gaussian with gaussian weighted 2D gaussians to perform spatial and orientation pooling
         return scales 
             
@@ -1331,6 +1341,27 @@ class LCN(nn.Module):
                 else:
                     ambiguous = False
         return x
+    
+    def symmetry_test(self, angle1, angle2, size, even_space = False):
+        
+        """
+        Function returns a numpy list of angles that are unambiguously clockwise or anticlockwise relative to 0°. 
+        Ambiguous angles include -pi/2, 0, pi/2 and pi which are not clockwise or anticlockwise relative to 0°.
+        A constant is either added or subtracted from these angles to make them unambiguous. Takes in the two angles 
+        and the number of angles as arguments. Setting even_space = True returns a numpy list of angles that are evenly 
+        spaced across 180° by removing the last element in the list.
+        """
+        
+        stimuli = [-np.pi/2, 0, np.pi/2, np.pi] # List of ambiguous stimuli that needs to be removed
+        if even_space == True:
+            x = np.linspace(angle1, angle2, size+1)
+            x = np.delete(x, -1) # Remove last element in list so that all elements are evenly spaced
+            
+
+        if even_space == False:
+            x = np.linspace(angle1, angle2, size)
+        return x
+    
     
     def find_nearest(self, tensor, value):
         
