@@ -29,12 +29,12 @@ class LCN(nn.Module):
         
         self.training_size = training_size # Batch size
         self.alpha = alpha # Learning rate
-        self.dimensions = self.input_size - self.simple_size + 1 # Dimension of activation map after V1 simple cell filtering
+        self.v1_dimensions = self.input_size - self.simple_size + 1 # Dimension of activation map after V1 simple cell filtering
         
         self.v4_size = v4_size # Size of 2D V4 gaussian filter (pixels)
         self.v4_stride = v4_stride # V4 filter stride
         self.v4_orientation_number = v4_orientation_number # Number of V4 filters selective for different orientations
-        self.v4_dimensions = int(((self.dimensions - self.v4_size)/self.v4_stride) + 1) # Dimension of activation map after V4 filtering
+        self.v4_dimensions = int(((self.v1_dimensions - self.v4_size)/self.v4_stride) + 1) # Dimension of activation map after V4 filtering
         
         # Initialising V1 weights – learnable parameter 
         self.simple_weight = torch.nn.Parameter(self.init_weights()) 
@@ -77,7 +77,7 @@ class LCN(nn.Module):
              # For each orientation and phase, create gabor filter with those parameters
             for i in range(self.simple_number):
                 for j in range(self.phis_sfs):
-                    for k in range(self.dimensions ** 2):
+                    for k in range(self.v1_dimensions ** 2):
                         theta = angles[i]
                         phi = self.phis_sfs_range[j]
                         kernel = self.generate_gabor(self.simple_size, theta, phi, 5)
@@ -88,7 +88,7 @@ class LCN(nn.Module):
 
             # Return torch tensor weights for each V1 gabor filter
             weight = torch.stack(weights).view(
-                1, self.simple_number*self.phis_sfs, 1, self.dimensions, self.dimensions, self.simple_size ** 2) 
+                1, self.simple_number*self.phis_sfs, 1, self.v1_dimensions, self.v1_dimensions, self.simple_size ** 2) 
             return weight 
         if self.sfs == True:
             # Create range of sfs between 0 and pi for each V1 gabor
@@ -98,7 +98,7 @@ class LCN(nn.Module):
             # For each orientation and sf, create gabor filter with those parameters
             for i in range(self.simple_number):
                 for j in range(self.phis_sfs):
-                    for k in range(self.dimensions ** 2):
+                    for k in range(self.v1_dimensions ** 2):
                         theta = angles[i]
                         lamda = self.phis_sfs_range[j]
                         kernel = self.generate_gabor(self.simple_size, theta, 0, lamda) 
@@ -110,7 +110,7 @@ class LCN(nn.Module):
 
             # Return torch tensor weights for each V1 gabor filter
             weight = torch.stack(weights).view(
-                1, self.simple_number*self.phis_sfs, 1, self.dimensions, self.dimensions, self.simple_size ** 2)
+                1, self.simple_number*self.phis_sfs, 1, self.v1_dimensions, self.v1_dimensions, self.simple_size ** 2)
             return weight 
     
     
@@ -203,7 +203,7 @@ class LCN(nn.Module):
         
         # Unfold input gabor stimuli with stride 1 to perform locally connected weight multiplication – returns shape 1 x 1 x dimensions x dimensions x simple_size x simple_size
         x = x.unfold(2, self.simple_size, 1).unfold(3, self.simple_size, 1) 
-        x = x.reshape(1, 1, self.dimensions, self.dimensions, self.simple_size * self.simple_size)
+        x = x.reshape(1, 1, self.v1_dimensions, self.v1_dimensions, self.simple_size * self.simple_size)
         
         # Locally connected multiplication, then summing over space to space to create activation maps with dimensions 1 x simple_number * phis_sfs x dimensions x dimensions
         out = (x.unsqueeze(1) * self.simple_weight).sum([2, -1]) 
@@ -216,9 +216,9 @@ class LCN(nn.Module):
             relu = F.relu(out[0][i:i+self.phis_sfs]) 
             
             # Sum all of these activation maps after relu 
-            pool = (torch.sum(relu, dim = 0)/(self.phis_sfs*200)).view(1, self.dimensions, self.dimensions) 
+            pool = (torch.sum(relu, dim = 0)/(self.phis_sfs*200)).view(1, self.v1_dimensions, self.v1_dimensions) 
             pools.append(pool)
-        pools = torch.stack(pools).view(self.simple_number, self.dimensions, self.dimensions)
+        pools = torch.stack(pools).view(self.simple_number, self.v1_dimensions, self.v1_dimensions)
         
         # V4 pooling
         v4_pools = []
@@ -238,7 +238,7 @@ class LCN(nn.Module):
         out = self.decision(out.float()) 
         return out
     
-    def mean_train(self, iterations, optimizer):
+    def train(self, iterations, optimizer):
         
         """
         Training loop. Takes in the number of iteractions and optimizer as arguments and trains the network over the 
@@ -477,8 +477,8 @@ class LCN(nn.Module):
         net_diff = []
         
         # Calculate frobenius norm of each gabor difference and return mean magnitude of change
-        for i in diff.view(self.simple_number*self.phis_sfs, 1, self.dimensions, self.dimensions, self.simple_size ** 2):
-            for j in i.view(self.dimensions, self.dimensions, self.simple_size ** 2):
+        for i in diff.view(self.simple_number*self.phis_sfs, 1, self.v1_dimensions, self.v1_dimensions, self.simple_size ** 2):
+            for j in i.view(self.v1_dimensions, self.v1_dimensions, self.simple_size ** 2):
                 for k in j:
                     net_diff.append(torch.linalg.norm(k.view(self.simple_size, self.simple_size), ord = 'fro').item())
         return np.mean(net_diff)
@@ -548,11 +548,11 @@ class LCN(nn.Module):
         x = np.linspace(-np.pi/2, np.pi/2, self.tuning_curve_sample)
         
         # Initialise tensor for all tuning curves after training, organized into orientations, phase/sfs, horizontal position, vertical position, tuning curve data
-        self.results = torch.empty(self.simple_number, self.phis_sfs, self.dimensions, self.dimensions, len(x))
+        self.results = torch.empty(self.simple_number, self.phis_sfs, self.v1_dimensions, self.v1_dimensions, len(x))
         
         # Initialise tensor for all tuning curves before training
         self.initial_tuning_curves = torch.empty(
-            self.simple_number, self.phis_sfs, self.dimensions, self.dimensions, len(x))
+            self.simple_number, self.phis_sfs, self.v1_dimensions, self.v1_dimensions, len(x))
         
         # Create gabor at each orientation and store measured activity of each V1 gabor filter in tensor
         with torch.no_grad():
@@ -698,22 +698,22 @@ class LCN(nn.Module):
                 
                 # Forward pass through V1 
                 out = test.unfold(2, self.simple_size, 1).unfold(3, self.simple_size, 1)
-                out = out.reshape(1, 1, self.dimensions, self.dimensions, self.simple_size * self.simple_size)
+                out = out.reshape(1, 1, self.v1_dimensions, self.v1_dimensions, self.simple_size * self.simple_size)
                 out_after = (out.unsqueeze(1) * self.simple_weight).sum([2, -1])
                 out_before = (out.unsqueeze(1) * self.before_v1weight).sum([2, -1])
                 pools_after = []
                 pools_before = []
                 for j in range(0, self.simple_number*self.phis_sfs, self.phis_sfs):
                     relu_after = F.relu(out_after[0][j:j+self.phis_sfs])
-                    pool = (torch.sum(relu_after, dim = 0)/(self.phis_sfs*200)).view(1, self.dimensions, self.dimensions)
+                    pool = (torch.sum(relu_after, dim = 0)/(self.phis_sfs*200)).view(1, self.v1_dimensions, self.v1_dimensions)
                     pools_after.append(pool)
                     
                     relu_before = F.relu(out_before[0][j:j+self.phis_sfs])
-                    pool = (torch.sum(relu_before, dim = 0)/(self.phis_sfs*200)).view(1, self.dimensions, self.dimensions)
+                    pool = (torch.sum(relu_before, dim = 0)/(self.phis_sfs*200)).view(1, self.v1_dimensions, self.v1_dimensions)
                     pools_before.append(pool)
                 
-                pools_after = torch.stack(pools_after).view(self.simple_number, self.dimensions, self.dimensions)
-                pools_before = torch.stack(pools_before).view(self.simple_number, self.dimensions, self.dimensions)
+                pools_after = torch.stack(pools_after).view(self.simple_number, self.v1_dimensions, self.v1_dimensions)
+                pools_before = torch.stack(pools_before).view(self.simple_number, self.v1_dimensions, self.v1_dimensions)
                 
                 v4_pools_after = []
                 v4_pools_before = []
@@ -1167,6 +1167,9 @@ class LCN(nn.Module):
         self.transfer_angle1 = angle1
         self.transfer_angle2 = angle2
         
+        self.train_x_location = x_location
+        self.train_y_location = y_location
+        
         # Create list of orientations for input gabor stimuli
         x = self.remove_ambiguous_stimuli(angle1, angle2, self.training_size, even_space = False) 
 
@@ -1218,6 +1221,23 @@ class LCN(nn.Module):
         
         # Calculate transfer performance
         self.transfer_score = transfer_score/test_size * 100
+        return self.transfer_score
+    
+    def plot_transfer_score(self):
+        scores = []
+        distances = []
+        for i in range(self.v1_dimensions):
+            for j in range(self.v1_dimensions):
+                score = self.transfer_test(i, j)
+                scores.append(score)
+                
+                distance = np.sqrt((i - (train_x_location) ** 2) + (j - (train_y_location) ** 2))
+                distances.append(distance)
+                                    
+        plt.plot(distances, scores)
+        plt.xlabel("Distance from trained angle")
+        plt.ylabel("Performance")
+        plt.title("Performance on untrained locations")
     
     # Helper functions
     
@@ -1244,14 +1264,17 @@ class LCN(nn.Module):
         frequency.
         """
         
+        if not 0 <= x_location <= self.v1_dimensions - 1 or not 0 <= y_location <= self.v1_dimensions - 1:
+            print("x_location and y_location needs to be between 0 and " + str(self.v1_dimensions - 1))
+        
         # Generate gabor and noise
-        kernel = self.generate_gabor(self.simple_size, theta, phi, lamda, random_sf = random_sf)
+        kernel = self.generate_gabor(self.simple_size, theta, phi, lamda, random_sf = random_sf).view(self.simple_size, self.simple_size)
         kernel_noise = torch.normal(0, 0.03, (self.input_size, self.input_size))
         
         # Add gabor to noise at particular location
-        for i in range(ksize):
-            for j in range(ksize):
-                kernel_noise[ksize + x_location][ksize + y_location] = kernel[i][j] + kernel_noise[ksize + x_location][ksize + y_location]
+        for i in range(self.simple_size):
+            for j in range(self.simple_size):
+                kernel_noise[i + y_location][j + x_location] = kernel[i][j] + kernel_noise[i + y_location][j + x_location]
         return kernel_noise
     
     def generate_gaussian(self, mean, std, kernlen):
