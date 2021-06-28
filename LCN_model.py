@@ -238,7 +238,7 @@ class LCN(nn.Module):
         out = self.decision(out.float()) 
         return out
     
-    def train(self, iterations, optimizer):
+    def train(self, iterations, optimizer, angle1, angle2, random_sf):
         
         """
         Training loop. Takes in the number of iteractions and optimizer as arguments and trains the network over the 
@@ -257,10 +257,11 @@ class LCN(nn.Module):
             optimizer.zero_grad() # Reset gradients each iteration
             self.training_score = 0 
             loss2 = torch.empty(self.training_size)
-            
             # Batch loop
             for j in range(self.training_size):
                 # Generate predictions for each input
+                self.inputting(angle1, angle2, random_sf = random_sf)
+                self.desired_outputting()
                 self.scores = self.forward(self.input[j][0].view(1, 1, self.input_size, self.input_size))
                 
                 # Calculate loss
@@ -365,6 +366,63 @@ class LCN(nn.Module):
         self.v1_tuning_curve()
         self.v4_tuning_curve()
         
+    def transfer_train(self, iterations, optimizer, angle1, angle2, x_location, y_location, random_sf):
+        
+        """
+        Training loop. Takes in the number of iteractions and optimizer as arguments and trains the network over the 
+        number of iteractions. Calculates mean loss over batch size and optimizes over this loss. 
+        """
+        
+        self.v1_weight_changes = []
+        self.v4_weight_changes = []
+        self.decision_weight_changes = []
+        
+        self.losses = []
+        self.training_scores = []
+
+        # Iteration loop
+        for i in tqdm(range(iterations)):
+            optimizer.zero_grad() # Reset gradients each iteration
+            self.training_score = 0 
+            loss2 = torch.empty(self.training_size)
+            # Batch loop
+            for j in range(self.training_size):
+                # Generate predictions for each input
+                self.transfer_inputting(angle1, angle2, x_location, y_location, random_sf = random_sf)
+                self.desired_outputting()
+                self.scores = self.forward(self.input[j][0].view(1, 1, self.input_size, self.input_size))
+                
+                # Calculate loss
+                loss1 = self.binary_loss(self.scores, self.desired_output[j].view(1)) 
+                
+                # Increase score if predicted label matches actual label
+                if torch.argmax(self.scores) == self.desired_output[j]: 
+                    self.training_score += 1
+                    
+                # Keep track of loss
+                loss2[j] = loss1 
+            
+            # Calculate average loss for each batch
+            loss = torch.sum(loss2)/self.training_size 
+            self.losses.append(loss)
+            
+            # Calculate performance for each batch
+            self.training_score = self.training_score/self.training_size * 100 
+            self.training_scores.append(self.training_score)
+            
+            # Keep track of weight changes in each layer
+            self.v1_weight_changes.append(self.v1_weight_change(self.before_v1weight, self.simple_weight)) 
+            self.v4_weight_changes.append(self.v4_weight_change(self.before_v4weight, self.v4_weight)) 
+            self.decision_weight_changes.append(self.decision_weight_change(self.before_decision_weight, self.decision.weight))
+            
+            # Backpropagate error and update weights
+            loss.backward() 
+            optimizer.step() 
+            
+        # Generate tuning curves    
+        self.v1_tuning_curve() 
+        self.v4_tuning_curve() 
+    
     def plot_training_error(self, color):
         
         """
@@ -1191,7 +1249,7 @@ class LCN(nn.Module):
         self.input = torch.stack(self.inputs).view(self.training_size, 1, self.input_size, self.input_size)#.to(self.device) 
         return self.input
     
-    def transfer_test(self, x_location, y_location):
+    def transfer_test(self, x_location, y_location, test_size):
         
         """
         Creates test gabors at new location using the same angle trained on and calculates performance of network. Takes in x and 
@@ -1201,12 +1259,14 @@ class LCN(nn.Module):
         transfer_score = 0
         
         # Create list of orientations for input gabor stimuli
-        x = self.remove_ambiguous_stimuli(self.transfer_angle1, self.transfer_angle2, self.training_size, even_space = False)
+        x = self.remove_ambiguous_stimuli(self.transfer_angle1, self.transfer_angle2, test_size, even_space = False)
         
         # For each orientation, create input gabor stimulus at that orientation at particular location
-        for i in range(self.training_size):
+        losses = []
+        for i in range(test_size):
             theta = x[i]
-            kernel = self.generate_location_gabor(theta, 0, 5, x_location, y_location, random_sf = False)
+            phi = np.random.uniform(0, np.pi)
+            kernel = self.generate_location_gabor(theta, phi, 5, x_location, y_location, random_sf = False)
             
             # Label stimulus as 0 if it is clockwise to reference orientation of 0 and 1 if counterclockwise
             if 0 < theta < np.pi/2: 
@@ -1215,29 +1275,45 @@ class LCN(nn.Module):
                 label = torch.tensor([1])
         
             with torch.no_grad():
-                a = self.forward(kernel)
-                if torch.argmax(a) == label:
+                pred = self.forward(kernel)
+                if torch.argmax(pred) == label:
                     transfer_score += 1
+                loss = self.binary_loss(pred, label) 
+                losses.append(loss)
         
-        # Calculate transfer performance
-        self.transfer_score = transfer_score/test_size * 100
-        return self.transfer_score
+        # Calculate transfer performance and error
+        self.transfer_score = (transfer_score/test_size) * 100
+        self.transfer_error = np.mean(losses)
+        
+        return self.transfer_score, self.transfer_error
     
-    def plot_transfer_score(self):
+    def plot_transfer_score(self, test_size, performance = True):
         scores = []
+        errors = []
         distances = []
         for i in range(self.v1_dimensions):
             for j in range(self.v1_dimensions):
-                score = self.transfer_test(i, j)
+                score, error = self.transfer_test(i, j, test_size)
                 scores.append(score)
+                errors.append(error)
                 
-                distance = np.sqrt((i - (train_x_location) ** 2) + (j - (train_y_location) ** 2))
+                distance = np.sqrt(((i - self.train_x_location) ** 2) + ((j - self.train_y_location) ** 2))
                 distances.append(distance)
-                                    
-        plt.plot(distances, scores)
-        plt.xlabel("Distance from trained angle")
-        plt.ylabel("Performance")
-        plt.title("Performance on untrained locations")
+                
+        if performance == True:
+            distances, scores = self.sort_lists(distances, scores)
+
+            plt.plot(distances, scores)
+            plt.xlabel("Distance from trained angle")
+            plt.ylabel("Performance (%)")
+            plt.title("Performance on untrained locations")
+        else:
+            distances, errors = self.sort_lists(distances, errors)
+            plt.plot(distances, errors)
+            plt.xlabel("Distance from trained angle")
+            plt.ylabel("Error")
+            plt.title("Error on untrained locations")
+
     
     # Helper functions
     
@@ -1275,7 +1351,7 @@ class LCN(nn.Module):
         for i in range(self.simple_size):
             for j in range(self.simple_size):
                 kernel_noise[i + y_location][j + x_location] = kernel[i][j] + kernel_noise[i + y_location][j + x_location]
-        return kernel_noise
+        return kernel_noise.view(1, 1, self.input_size, self.input_size)
     
     def generate_gaussian(self, mean, std, kernlen):
         
