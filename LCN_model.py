@@ -36,6 +36,12 @@ class LCN(nn.Module):
         self.v4_orientation_number = v4_orientation_number # Number of V4 filters selective for different orientations
         self.v4_dimensions = int(((self.v1_dimensions - self.v4_size)/self.v4_stride) + 1) # Dimension of activation map after V4 filtering
         
+        # Setting device to GPU or CPU but GPU currently not needed
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda:0")
+        else:
+            self.device = torch.device("cpu") 
+        
         # Initialising V1 weights – learnable parameter 
         self.simple_weight = torch.nn.Parameter(self.init_weights()) 
         
@@ -49,15 +55,10 @@ class LCN(nn.Module):
             torch.zeros((2, self.v4_dimensions*self.v4_dimensions*self.v4_orientation_number))) 
         
         # Saving initial weights
-        self.before_v1weight = self.simple_weight.clone() 
-        self.before_v4weight = self.v4_weight.clone() 
-        self.before_decision_weight = self.decision.weight.clone() 
+        self.before_v1weight = self.simple_weight.clone()#.to(self.device)
+        self.before_v4weight = self.v4_weight.clone()#.to(self.device)
+        self.before_decision_weight = self.decision.weight.clone()#.to(self.device)
         
-        # Setting device to GPU or CPU but GPU currently not needed
-        if torch.cuda.is_available():
-            self.device = torch.device("cuda:0")
-        else:
-            self.device = torch.device("cpu") 
     
     # Network functions
     
@@ -163,22 +164,20 @@ class LCN(nn.Module):
         self.labels = []
         self.inputs = []
     
-        # Create list of orientations for input gabor stimuli
-        x = self.remove_ambiguous_stimuli(angle1, angle2, self.training_size, even_space = False) 
+        # For each orientation, create input gabor stimulus at that orientation with test_size/2 random phases
+        for angle in [angle1, angle2]:
+            for i in range(int(self.training_size/2)):
+                theta = angle
+                phi = np.random.uniform(0, np.pi) # Randomize phase of input stimuli
+                kernel = self.generate_gabor(self.input_size, theta, phi, 5, random_sf = random_sf) 
+                self.inputs.append(kernel)
 
-        # For each orientation, create input gabor stimulus at that orientation
-        for i in range(self.training_size):
-            theta = x[i]
-            phi = np.random.uniform(0, np.pi) # Randomize phase of input stimuli
-            kernel = self.generate_gabor(self.input_size, theta, phi, 5, random_sf = random_sf) 
-            self.inputs.append(kernel)
-            
-            # Label stimulus as 0 if it is clockwise to reference orientation of 0 and 1 if counterclockwise
-            if 0 < theta < np.pi/2: 
-                label = torch.tensor([0])
-            else:
-                label = torch.tensor([1])
-            self.labels.append(label)
+                # Label stimulus as 0 if it is clockwise to reference orientation of 0 and 1 if counterclockwise
+                if 0 < theta < np.pi/2: 
+                    label = torch.tensor([0])
+                else:
+                    label = torch.tensor([1])
+                self.labels.append(label)
             
         # Stack all input gabor stimuli into one tensor
         self.input = torch.stack(self.inputs).view(self.training_size, 1, self.input_size, self.input_size)#.to(self.device) 
@@ -238,7 +237,7 @@ class LCN(nn.Module):
         out = self.decision(out.float()) 
         return out
     
-    def train(self, iterations, optimizer, angle1, angle2, random_sf):
+    def train(self, iterations, optimizer):
         
         """
         Training loop. Takes in the number of iteractions and optimizer as arguments and trains the network over the 
@@ -260,8 +259,6 @@ class LCN(nn.Module):
             # Batch loop
             for j in range(self.training_size):
                 # Generate predictions for each input
-                self.inputting(angle1, angle2, random_sf = random_sf)
-                self.desired_outputting()
                 self.scores = self.forward(self.input[j][0].view(1, 1, self.input_size, self.input_size))
                 
                 # Calculate loss
@@ -276,7 +273,7 @@ class LCN(nn.Module):
             
             # Calculate average loss for each batch
             loss = torch.sum(loss2)/self.training_size 
-            self.losses.append(loss)
+            self.losses.append(float(loss))
             
             # Calculate performance for each batch
             self.training_score = self.training_score/self.training_size * 100 
@@ -388,8 +385,6 @@ class LCN(nn.Module):
             # Batch loop
             for j in range(self.training_size):
                 # Generate predictions for each input
-                self.transfer_inputting(angle1, angle2, x_location, y_location, random_sf = random_sf)
-                self.desired_outputting()
                 self.scores = self.forward(self.input[j][0].view(1, 1, self.input_size, self.input_size))
                 
                 # Calculate loss
@@ -430,7 +425,7 @@ class LCN(nn.Module):
         for each batch of training data. Takes in color as argument. 
         """
         
-        plt.plot([loss.detach().cpu().numpy() for loss in self.losses], color = color)
+        plt.plot([loss for loss in self.losses], color = color)
         plt.xlabel("Time (epochs)")
         plt.ylabel("Error")
 
@@ -446,38 +441,39 @@ class LCN(nn.Module):
         plt.xlabel("Time (epochs)")
         plt.ylabel("Performance (%)")
         
-    def generalization(self, angle, test_size):
+    def generalization(self, angle, phase_number):
         
         """
         Function used to test model against test_size number of gabors between -angle and angle to measure 
         generalization error and performance.
         """
         
-        # Create list of angles between -angle and angle
-        angles = self.remove_ambiguous_stimuli(-angle, angle, test_size, even_space = False)
+        # Create list of phases between 0 and pi
+        phases = np.linspace(0, np.pi, phase_number)
         self.generalization_score = 0
         general_error = []
         
-        # Create gabors at each orientation and present to network
-        for i in range(test_size):
-            # Create gabor
-            gabor = self.generate_gabor(self.input_size, angles[i], phi = 0, lamda = 5).clone().detach()
-            
-            # Get correct labels for test gabors
-            if 0 < angles[i] < np.pi/2:
-                label = torch.tensor([0])
-            else:
-                label = torch.tensor([1])
-            
-            # Present to network and measure performance and error
-            with torch.no_grad():
-                a = self.forward(gabor)
-                if torch.argmax(a) == label:
-                    self.generalization_score += 1
-                general_error.append(self.binary_loss(a, label))
+        # Create gabors at each orientation and phase and present to network
+        for angle in [-angle, angle]:
+            for phi in phases:
+                # Create gabor
+                gabor = self.generate_gabor(self.input_size, angle, phi, lamda = 5).clone().detach()
+
+                # Get correct labels for test gabors
+                if 0 < angle < np.pi/2:
+                    label = torch.tensor([0])
+                else:
+                    label = torch.tensor([1])
+
+                # Present to network and measure performance and error
+                with torch.no_grad():
+                    a = self.forward(gabor)
+                    if torch.argmax(a) == label:
+                        self.generalization_score += 1
+                    general_error.append(self.binary_loss(a, label))
         
         # Calculate generalization performance and error
-        self.generalization_score = self.generalization_score/test_size * 100
+        self.generalization_score = self.generalization_score/(2 * phase_number) * 100
         self.general_mean_error = np.mean(general_error)
 
     def plot_generalization_performance(self, color):
@@ -500,7 +496,7 @@ class LCN(nn.Module):
         plt.xlabel("Time (epochs)")
         plt.ylabel("Error")
    
-    def plot_angle_performance(self, number, color):
+    def plot_angle_performance(self, angle_number, phase_number, color):
         
         """
         Plots the angle/performance graph for the model. Takes in the number of test angles and plot color as 
@@ -509,13 +505,12 @@ class LCN(nn.Module):
         """
         
         # Create list of angles between 0 and pi/2
-        angles = self.remove_ambiguous_stimuli(0, np.pi/2, number, even_space = False)
+        angles = self.remove_ambiguous_stimuli(0, np.pi/2, angle_number, even_space = False)
         self.angle_scores = []
         
         # For each angle, calculate generalization performance on 50 gabors with orientations between -angle and angle
-        for i in range(number):
-            self.generalization(angles[i], 2)
-#             print((180*angles[i])/np.pi, self.generalization_score)
+        for i in range(angle_number):
+            self.generalization(angles[i], phase_number)
             self.angle_scores.append(self.generalization_score)
             
         # Plot performance on each angle
@@ -623,7 +618,7 @@ class LCN(nn.Module):
                                 
                                 # Create gabor
                                 test = self.generate_gabor(self.simple_size, x[i], 0, 5).view(
-                                    self.simple_size, self.simple_size)
+                                    self.simple_size, self.simple_size)#.to(self.device)
                                 
                                 # Present to specific gabor after training
                                 result = torch.sum(
@@ -755,7 +750,7 @@ class LCN(nn.Module):
                 test = self.generate_gabor(self.input_size, x[i], 0, 5).view(1, 1, self.input_size, self.input_size)
                 
                 # Forward pass through V1 
-                out = test.unfold(2, self.simple_size, 1).unfold(3, self.simple_size, 1)
+                out = test.unfold(2, self.simple_size, 1).unfold(3, self.simple_size, 1)#.to(self.device)
                 out = out.reshape(1, 1, self.v1_dimensions, self.v1_dimensions, self.simple_size * self.simple_size)
                 out_after = (out.unsqueeze(1) * self.simple_weight).sum([2, -1])
                 out_before = (out.unsqueeze(1) * self.before_v1weight).sum([2, -1])
@@ -1121,8 +1116,8 @@ class LCN(nn.Module):
                 before_ranges.append(x[before_preferred_orientation] - x[trained_index])
                 
                 # Calculate slope at trained angle
-                after_slope = (curve[trained_index + 1] - curve[trained_index])/(180/self.tuning_curve_sample)
-                before_slope = (initial[trained_index + 1] - initial[trained_index])/(180/self.tuning_curve_sample)
+                after_slope = (curve[trained_index + 1] - curve[trained_index - 1])/(180/self.tuning_curve_sample)
+                before_slope = (initial[trained_index + 1] - initial[trained_index - 1])/(180/self.tuning_curve_sample)
                 after_slopes.append(torch.abs(after_slope).item())
                 before_slopes.append(torch.abs(before_slope).item())
             
@@ -1162,8 +1157,8 @@ class LCN(nn.Module):
             self.v4_before_range.append(x[before_preferred_orientation] - x[trained_index])
             
             # Calculate slope at trained angle and save them
-            after_slope = (curve[trained_index + 1] - curve[trained_index])/(180/self.tuning_curve_sample)
-            before_slope = (initial[trained_index + 1] - initial[trained_index])/(180/self.tuning_curve_sample)
+            after_slope = (curve[trained_index + 1] - curve[trained_index - 1])/(180/self.tuning_curve_sample)
+            before_slope = (initial[trained_index + 1] - initial[trained_index - 1])/(180/self.tuning_curve_sample)
             self.v4_after_slopes.append(torch.abs(after_slope).item())
             self.v4_before_slopes.append(torch.abs(before_slope).item())
         
@@ -1249,7 +1244,7 @@ class LCN(nn.Module):
         self.input = torch.stack(self.inputs).view(self.training_size, 1, self.input_size, self.input_size)#.to(self.device) 
         return self.input
     
-    def transfer_test(self, x_location, y_location, test_size):
+    def transfer_test(self, x_location, y_location, phase_number):
         
         """
         Creates test gabors at new location using the same angle trained on and calculates performance of network. Takes in x and 
@@ -1258,31 +1253,30 @@ class LCN(nn.Module):
         
         transfer_score = 0
         
-        # Create list of orientations for input gabor stimuli
-        x = self.remove_ambiguous_stimuli(self.transfer_angle1, self.transfer_angle2, test_size, even_space = False)
-        
         # For each orientation, create input gabor stimulus at that orientation at particular location
         losses = []
-        for i in range(test_size):
-            theta = x[i]
-            phi = np.random.uniform(0, np.pi)
-            kernel = self.generate_location_gabor(theta, phi, 5, x_location, y_location, random_sf = False)
+        phases = np.linspace(0, np.pi, phase_number)
+        for angle in [self.transfer_angle1, self.transfer_angle2]:
+            theta = angle
+            for j in range(phase_number):
+                phi = phases[j]
+                kernel = self.generate_location_gabor(theta, j, 5, x_location, y_location, random_sf = False)
             
             # Label stimulus as 0 if it is clockwise to reference orientation of 0 and 1 if counterclockwise
-            if 0 < theta < np.pi/2: 
-                label = torch.tensor([0])
-            else:
-                label = torch.tensor([1])
-        
-            with torch.no_grad():
-                pred = self.forward(kernel)
-                if torch.argmax(pred) == label:
-                    transfer_score += 1
-                loss = self.binary_loss(pred, label) 
-                losses.append(loss)
+                if 0 < theta < np.pi/2: 
+                    label = torch.tensor([0])
+                else:
+                    label = torch.tensor([1])
+
+                with torch.no_grad():
+                    pred = self.forward(kernel)
+                    if torch.argmax(pred) == label:
+                        transfer_score += 1
+                    loss = self.binary_loss(pred, label) 
+                    losses.append(loss)
         
         # Calculate transfer performance and error
-        self.transfer_score = (transfer_score/test_size) * 100
+        self.transfer_score = (transfer_score/(2 * phase_number)) * 100
         self.transfer_error = np.mean(losses)
         
         return self.transfer_score, self.transfer_error
@@ -1291,7 +1285,7 @@ class LCN(nn.Module):
         scores = []
         errors = []
         distances = []
-        for i in range(self.v1_dimensions):
+        for i in tqdm(range(self.v1_dimensions)):
             for j in range(self.v1_dimensions):
                 score, error = self.transfer_test(i, j, test_size)
                 scores.append(score)
@@ -1439,26 +1433,6 @@ class LCN(nn.Module):
                     ambiguous = True
                 else:
                     ambiguous = False
-        return x
-    
-    def symmetry_test(self, angle1, angle2, size, even_space = False):
-        
-        """
-        Function returns a numpy list of angles that are unambiguously clockwise or anticlockwise relative to 0°. 
-        Ambiguous angles include -pi/2, 0, pi/2 and pi which are not clockwise or anticlockwise relative to 0°.
-        A constant is either added or subtracted from these angles to make them unambiguous. Takes in the two angles 
-        and the number of angles as arguments. Setting even_space = True returns a numpy list of angles that are evenly 
-        spaced across 180° by removing the last element in the list.
-        """
-        
-        stimuli = [-np.pi/2, 0, np.pi/2, np.pi] # List of ambiguous stimuli that needs to be removed
-        if even_space == True:
-            x = np.linspace(angle1, angle2, size+1)
-            x = np.delete(x, -1) # Remove last element in list so that all elements are evenly spaced
-            
-
-        if even_space == False:
-            x = np.linspace(angle1, angle2, size)
         return x
     
     
