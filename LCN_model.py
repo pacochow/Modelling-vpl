@@ -99,6 +99,8 @@ class LCN(nn.Module):
                         theta = self.v1_angles[i]
                         phi = self.phis_sfs_range[j]
                         kernel = self.generate_gabor(self.v1_size, theta, phi, 5)
+                        kernel = kernel/self.rescale
+                        
                         # Add random noise from normal distribution 
 #                         noise = torch.normal(0, 0.03, (self.v1_size, self.v1_size)) 
 #                         kernel = kernel + noise 
