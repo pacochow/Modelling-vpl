@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 class LCN(nn.Module):
     
-    def __init__(self, input_size, v1_size, v1_orientation_number, v4_size, v4_stride, v4_orientation_number, phis_sfs, training_size, phis = True, sfs = False, alpha = 0.1):
+    def __init__(self, input_size, v1_size, v1_orientation_number, v4_size, v4_stride, v4_orientation_number, phis_sfs, training_size, phis = True, sfs = False, alpha = 0.1, rescale = 10):
 
         """
         Initialize network parameters.
@@ -39,6 +39,7 @@ class LCN(nn.Module):
         self.phis_sfs = phis_sfs # Number of V1 gabor filters at different phases/sfs depending on phis = True or sfs = True
         self.phis = phis # Boolean – True if pooling over phase
         self.sfs = sfs # Boolean – True if pooling over sf
+        self.rescale = rescale
         
         self.training_size = training_size # Batch size
         self.alpha = alpha # Learning rate
@@ -119,6 +120,7 @@ class LCN(nn.Module):
                         theta = self.v1_angles[i]
                         lamda = self.phis_sfs_range[j]
                         kernel = self.generate_gabor(self.v1_size, theta, 0, lamda) 
+                        kernel = kernel/self.rescale
                         
                         # Add random noise from normal distribution
 #                         noise = torch.normal(0, 0.03, (self.v1_size, self.v1_size)) 
@@ -153,6 +155,7 @@ class LCN(nn.Module):
                         
                         # Generate 3D gaussian filter and roll the orientation gaussian to change the peaks
                         kernel = self.generate_3d_gaussian(mean = self.v1_angles[int(round(self.v1_orientation_number/2, 0))], spatial_std = 0.5, orientation_std = 0.7, roll = (int(round(self.v1_orientation_number/2, 0)) - index))[orientation] 
+                        kernel = kernel/self.rescale
                         
                         # Add random noise from normal distribution scaled by mean of each gaussian filter so noise does not cover up gaussian
 #                         noise = torch.normal(0, 0.015, (self.v4_size, self.v4_size)) * kernel.mean() 
