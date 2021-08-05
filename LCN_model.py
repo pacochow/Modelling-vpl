@@ -9,11 +9,12 @@ import torch.nn.functional as F
 import torch.optim as optim
 import cv2
 from tqdm import tqdm
+import logging
 
 
 class LCN(nn.Module):
     
-    def __init__(self, input_size, v1_size, v1_orientation_number, v4_size, v4_stride, v4_orientation_number, phis_sfs, training_size, phis = True, sfs = False, alpha = 0.1, rescale = 10):
+    def __init__(self, input_size, v1_size, v1_orientation_number, v4_size, v4_stride, v4_orientation_number, phis_sfs, training_size, phis = True, sfs = False, alpha = 0.01, rescale = 1):
 
         """
         Initialize network parameters.
@@ -39,7 +40,7 @@ class LCN(nn.Module):
         self.phis_sfs = phis_sfs # Number of V1 gabor filters at different phases/sfs depending on phis = True or sfs = True
         self.phis = phis # Boolean – True if pooling over phase
         self.sfs = sfs # Boolean – True if pooling over sf
-        self.rescale = rescale
+        self.rescale = rescale # scalar multiplier for scaling of V1 and V4 weights, defaults to 1 (no scaling)
         
         self.training_size = training_size # Batch size
         self.alpha = alpha # Learning rate
@@ -75,7 +76,15 @@ class LCN(nn.Module):
         self.before_v4weight = self.v4_weight.clone()#.to(self.device)
         self.before_decision_weight = self.decision.weight.clone()#.to(self.device)
         
-        
+        # Initialise logger
+#         logger = logging.getLogger('train_log')
+#         logger.setLevel(logging.INFO)
+#         f_handler = logging.FileHandler('train_log.log')
+#         f_handler.setLevel(logging.INFO)
+#         f_format = logging.Formatter('%(asctime)s - %(message)s')
+#         f_handler.setFormatter(f_format)
+#         f_handler.setLevel(logging.INFO)
+#         logger.addHandler(f_handler)
     
     # Network training functions
     
@@ -102,6 +111,7 @@ class LCN(nn.Module):
                         # Add random noise from normal distribution 
 #                         noise = torch.normal(0, 0.03, (self.v1_size, self.v1_size)) 
 #                         kernel = kernel + noise 
+                        kernel = kernel*self.rescale
                         weights.append(kernel)
 
             # Return torch tensor weights for each V1 gabor filter
@@ -120,7 +130,7 @@ class LCN(nn.Module):
                         theta = self.v1_angles[i]
                         lamda = self.phis_sfs_range[j]
                         kernel = self.generate_gabor(self.v1_size, theta, 0, lamda) 
-                        kernel = kernel/self.rescale
+                        kernel = kernel*self.rescale
                         
                         # Add random noise from normal distribution
 #                         noise = torch.normal(0, 0.03, (self.v1_size, self.v1_size)) 
@@ -155,7 +165,7 @@ class LCN(nn.Module):
                         
                         # Generate 3D gaussian filter and roll the orientation gaussian to change the peaks
                         kernel = self.generate_3d_gaussian(mean = self.v1_angles[int(round(self.v1_orientation_number/2, 0))], spatial_std = 0.5, orientation_std = 0.7, roll = (int(round(self.v1_orientation_number/2, 0)) - index))[orientation] 
-                        kernel = kernel/self.rescale
+                        kernel = kernel*self.rescale
                         
                         # Add random noise from normal distribution scaled by mean of each gaussian filter so noise does not cover up gaussian
 #                         noise = torch.normal(0, 0.015, (self.v4_size, self.v4_size)) * kernel.mean() 
@@ -321,6 +331,7 @@ class LCN(nn.Module):
         Training loop. Takes in the number of iteractions and optimizer as arguments and trains the network over the 
         number of iteractions. Calculates mean loss over batch size and optimizes over this loss. 
         """
+        logger = logging.getLogger('train_log')
         
         self.v1_weight_changes = []
         self.v4_weight_changes = []
@@ -334,6 +345,9 @@ class LCN(nn.Module):
 
         # Iteration loop
         for i in tqdm(range(iterations)):
+            if i % 50 == 0:
+                logger.info('Iterations completed: {:.0f}'.format(i))
+            
             optimizer.zero_grad() # Reset gradients each iteration
             self.training_score = 0 
             loss2 = torch.empty(self.training_size)
