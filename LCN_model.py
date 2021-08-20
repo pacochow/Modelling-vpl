@@ -14,7 +14,7 @@ import logging
 
 class LCN(nn.Module):
     
-    def __init__(self, input_size, v1_size, v1_orientation_number, v4_size, v4_stride, v4_orientation_number, phis_sfs, training_size, phis = True, sfs = False, alpha = 0.01, rescale = 1):
+    def __init__(self, input_size, v1_size, v1_orientation_number, v4_size, v4_stride, v4_orientation_number, phis_sfs, training_size, phis = True, sfs = False, alpha = 0.01, v1_rescale = 1, v4_rescale = 1):
 
         """
         Initialize network parameters.
@@ -40,7 +40,8 @@ class LCN(nn.Module):
         self.phis_sfs = phis_sfs # Number of V1 gabor filters at different phases/sfs depending on phis = True or sfs = True
         self.phis = phis # Boolean – True if pooling over phase
         self.sfs = sfs # Boolean – True if pooling over sf
-        self.rescale = rescale # scalar multiplier for scaling of V1 and V4 weights, defaults to 1 (no scaling)
+        self.v1_rescale = v1_rescale # scalar multiplier for scaling of V1 weights, defaults to 1 (no scaling)
+        self.v4_rescale = v4_rescale # scalar multiplier for scaling of V4 weights, defaults to 1 (no scaling)
         
         self.training_size = training_size # Batch size
         self.alpha = alpha # Learning rate
@@ -108,12 +109,11 @@ class LCN(nn.Module):
                         theta = self.v1_angles[i]
                         phi = self.phis_sfs_range[j]
                         kernel = self.generate_gabor(self.v1_size, theta, phi, 5)
-                        kernel = kernel/self.rescale
+                        kernel = kernel * self.v1_rescale
                         
                         # Add random noise from normal distribution 
 #                         noise = torch.normal(0, 0.03, (self.v1_size, self.v1_size)) 
 #                         kernel = kernel + noise 
-                        kernel = kernel*self.rescale
                         weights.append(kernel)
 
             # Return torch tensor weights for each V1 gabor filter
@@ -132,7 +132,7 @@ class LCN(nn.Module):
                         theta = self.v1_angles[i]
                         lamda = self.phis_sfs_range[j]
                         kernel = self.generate_gabor(self.v1_size, theta, 0, lamda) 
-                        kernel = kernel*self.rescale
+                        kernel = kernel * self.v1_rescale
                         
                         # Add random noise from normal distribution
 #                         noise = torch.normal(0, 0.03, (self.v1_size, self.v1_size)) 
@@ -167,7 +167,7 @@ class LCN(nn.Module):
                         
                         # Generate 3D gaussian filter and roll the orientation gaussian to change the peaks
                         kernel = self.generate_3d_gaussian(mean = self.v1_angles[int(round(self.v1_orientation_number/2, 0))], spatial_std = 0.5, orientation_std = 0.7, roll = (int(round(self.v1_orientation_number/2, 0)) - index))[orientation] 
-                        kernel = kernel*self.rescale
+                        kernel = kernel * self.v4_rescale
                         
                         # Add random noise from normal distribution scaled by mean of each gaussian filter so noise does not cover up gaussian
 #                         noise = torch.normal(0, 0.015, (self.v4_size, self.v4_size)) * kernel.mean() 
@@ -305,7 +305,7 @@ class LCN(nn.Module):
             relu = F.relu(out[0][i:i+self.phis_sfs]) 
             
             # Sum all of these activation maps after relu 
-            pool = (torch.sum(relu, dim = 0)/(self.phis_sfs*200)).view(1, self.v1_dimensions, self.v1_dimensions) 
+            pool = (torch.sum(relu, dim = 0)/(self.phis_sfs)).view(1, self.v1_dimensions, self.v1_dimensions) 
             pools.append(pool)
         pools = torch.stack(pools).view(self.v1_orientation_number, self.v1_dimensions, self.v1_dimensions)
         
@@ -350,6 +350,11 @@ class LCN(nn.Module):
             if i % 50 == 0:
                 logger.info('Iterations completed: {:.0f}'.format(i))
             
+            # End training if performance reaches over 85% 
+            if len(self.training_scores) != 0 and self.training_scores[-1] >= 85:
+                logger.info('Training terminated at {:.0f} iterations, {:.0f}% training performance reached'.format(i, self.training_scores[-1]))
+                break
+                
             optimizer.zero_grad() # Reset gradients each iteration
             self.training_score = 0 
             loss2 = torch.empty(self.training_size)
@@ -402,6 +407,8 @@ class LCN(nn.Module):
         gabors between -test_angle and test_angle to see how well it generalizes. 
         """
         
+       
+        
         self.v1_weight_changes = []
         self.v4_weight_changes = []
         self.decision_weight_changes = []
@@ -422,6 +429,8 @@ class LCN(nn.Module):
             
             # Iteration loop
             for i in tqdm(range(iterations)):
+                if i % 50 == 0:
+                    logger.info('Iterations completed: {:.0f}'.format(i))
                 optimizer.zero_grad() # Reset gradients each iteration
                 self.training_score = 0
                 loss2 = torch.empty(self.training_size)
@@ -718,14 +727,14 @@ class LCN(nn.Module):
                                 self.initial_tuning_curves[orientation][sf][horizontal][vertical][i] = initial_result
 
         # Normalize tuning curves to – divide by maximum point on curve if tuning curve is positive and minimum point if tuning curve is negative 
-        for j in range(self.phis_sfs):
-            if torch.abs(self.results[:, j].max()) > torch.abs(self.results[:, j].min()):
-                self.results[:, j] = self.results[:, j] / self.results[:, j].max()
-                self.initial_tuning_curves[:, j] = self.initial_tuning_curves[:, j] / self.initial_tuning_curves[:, j].max()
+#         for j in range(self.phis_sfs):
+#             if torch.abs(self.results[:, j].max()) > torch.abs(self.results[:, j].min()):
+#                 self.results[:, j] = self.results[:, j] / self.initial_tuning_curves[:, j].max()
+#                 self.initial_tuning_curves[:, j] = self.initial_tuning_curves[:, j] / self.initial_tuning_curves[:, j].max()
 
-            else:
-                self.results[:, j, :, :, :] = self.results[:, j, :, :, :] / self.results[:, j, :, :, :].min()
-                self.initial_tuning_curves[:, j, :, :, :] = self.initial_tuning_curves[:, j, :, :, :] / self.initial_tuning_curves[:, j, :, :, :].min()
+#             else:
+#                 self.results[:, j, :, :, :] = self.results[:, j, :, :, :] / self.initial_tuning_curves[:, j, :, :, :].min()
+#                 self.initial_tuning_curves[:, j, :, :, :] = self.initial_tuning_curves[:, j, :, :, :] / self.initial_tuning_curves[:, j, :, :, :].min()
                         
                         
                     
@@ -884,8 +893,8 @@ class LCN(nn.Module):
                 self.v4_initial_tuning_curves[:, :, :, i] = v4_pool_before
                        
         # Normalize tuning curves
-        self.v4_results = self.v4_results / self.v4_results.max()
-        self.v4_initial_tuning_curves = self.v4_initial_tuning_curves / self.v4_initial_tuning_curves.max()
+#         self.v4_results = self.v4_results / self.v4_initial_tuning_curves.max()
+#         self.v4_initial_tuning_curves = self.v4_initial_tuning_curves / self.v4_initial_tuning_curves.max()
                        
     def plot_v4_tuning_curve(self, position, differences = False):
         
@@ -1209,7 +1218,7 @@ class LCN(nn.Module):
             # Find index closest to trained angle
             trained_index1 = self.find_nearest(torch.tensor(x), trained_angle1)
             trained_index2 = self.find_nearest(torch.tensor(x), trained_angle2)
-            
+
             for j in range(self.phis_sfs):
                 
                 # Set V1 tuning curve at particular orientation, phase/sf and position after and before training
@@ -1219,38 +1228,51 @@ class LCN(nn.Module):
                 # Find index of preferred orientation of curve
                 if torch.abs(curve.max()) > torch.abs(curve.min()):
                     after_preferred_orientation = curve.argmax().item()
+                
+                if torch.abs(initial.max()) > torch.abs(initial.min()):
                     before_preferred_orientation = initial.argmax().item()
                 
-                else:
+                if torch.abs(curve.max()) < torch.abs(curve.min()):
                     after_preferred_orientation = curve.argmin().item()
-                    before_preferred_orientation = initial.argmin().item()
+                    
+                if torch.abs(initial.max()) < torch.abs(initial.min()):
+                    after_preferred_orientation = initial.argmin().item()
                 
                 # Save differences between preferred orientation and trained angle and save slope at trained angle – use negative trained angle if preferred orientation is negative and vice versa
                 
                 if x[after_preferred_orientation] <= 0:
-                    
                     # Calculate difference between preferred orientation and trained angle
                     after_ranges.append(x[after_preferred_orientation] - x[trained_index1])
-                    before_ranges.append(x[before_preferred_orientation] - x[trained_index1])
-
-                
+                    
                     # Calculate slope at trained angle
                     after_slope = (curve[trained_index1 + 1] - curve[trained_index1 - 1])/(2 * 180/self.tuning_curve_sample)
-                    before_slope = (initial[trained_index1 + 1] - initial[trained_index1 - 1])/(2 * 180/self.tuning_curve_sample)
+                    
 
-                
                 else:
                     # Calculate difference between preferred orientation and trained angle
                     after_ranges.append(x[after_preferred_orientation] - x[trained_index2])
-                    before_ranges.append(x[before_preferred_orientation] - x[trained_index2])
                     
                     # Calculate slope at trained angle
                     after_slope = (curve[trained_index2 + 1] - curve[trained_index2 - 1])/(2 * 180/self.tuning_curve_sample)
+                    
+                
+                if x[before_preferred_orientation] <= 0:    
+                    # Calculate difference between preferred orientation and trained angle
+                    before_ranges.append(x[before_preferred_orientation] - x[trained_index1])
+                    
+                    # Calculate slope at trained angle
+                    before_slope = (initial[trained_index1 + 1] - initial[trained_index1 - 1])/(2 * 180/self.tuning_curve_sample)
+                
+                else:
+                    # Calculate difference between preferred orientation and trained angle
+                    before_ranges.append(x[before_preferred_orientation] - x[trained_index2])
+                    
+                    # Calculate slope at trained angle
                     before_slope = (initial[trained_index2 + 1] - initial[trained_index2 - 1])/(2 * 180/self.tuning_curve_sample)
                     
                 after_slopes.append(torch.abs(after_slope).item())
                 before_slopes.append(torch.abs(before_slope).item())
-            
+                
             # Calculate mean difference between preferred orientation and trained angle of all tuning curves selective for particular orientation but different phase/sfs
             mean_after_range = np.mean(after_ranges)
             mean_before_range = np.mean(before_ranges)
@@ -1273,7 +1295,6 @@ class LCN(nn.Module):
         
         self.v4_after_range = []
         self.v4_before_range = []
-        
         
         for k in range(self.v4_orientation_number):
             
@@ -1314,6 +1335,10 @@ class LCN(nn.Module):
         self.v4_after_range, self.v4_after_slopes = self.sort_lists(self.v4_after_range, self.v4_after_slopes)
         self.v4_before_range, self.v4_before_slopes = self.sort_lists(self.v4_before_range, self.v4_before_slopes)
         
+        self.v1_mean_after_slope = np.mean(self.v1_mean_after_slopes)
+        self.v1_mean_before_slope = np.mean(self.v1_mean_before_slopes)
+        self.v4_mean_after_slope = np.mean(self.v4_after_slopes)
+        self.v4_mean_before_slope = np.mean(self.v4_before_slopes)
         
     def plot_otc_curve(self):
         
@@ -1323,8 +1348,6 @@ class LCN(nn.Module):
        
         plt.plot(self.v1_before_range, self.v1_mean_before_slopes)
         plt.plot(self.v1_after_range, self.v1_mean_after_slopes)
-#         for i in range(len(self.v1_before_range)):
-#             print(self.v1_before_range[i], self.v1_mean_before_slopes[i])
         
         plt.plot(self.v4_before_range, self.v4_before_slopes)
         plt.plot(self.v4_after_range, self.v4_after_slopes)
@@ -1357,13 +1380,17 @@ class LCN(nn.Module):
             plt.plot(self.v1_diff_range, self.v1_diff)
             plt.plot(self.v4_diff_range, self.v4_diff)
             
+            plt.xlabel("Absolute difference between preferred orientation and trained orientation (Degrees)")
+            
         else:
             # Plot differences
             plt.plot(self.v1_before_range, self.v1_diff)
             plt.plot(self.v4_before_range, self.v4_diff)
+            
+            plt.xlabel("Difference between preferred orientation and trained orientation (Degrees)")
         
         plt.legend(["V1 difference", "V4 difference"])
-        plt.xlabel("Absolute difference between preferred orientation and trained orientation (Degrees)")
+        
         plt.ylabel("Difference between slope at trained orientation before and after training (Change/Degrees)")
      
     
