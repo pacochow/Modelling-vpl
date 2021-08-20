@@ -12,17 +12,18 @@ from utils import funcs
 
 logger = funcs.initLogger('train_log','train_log.log')
 
-savepath = 'trained_models/weight_scale05/' #path to existing directory for saving trained models
+savepath = 'trained_models/weight_scale_05_1' #path to existing directory for saving trained models
 if not funcs.path_exists(savepath):
     raise ValueError('Save directory does not exist! Create directory or amend savepath')
 logger.info('Model save path validated - saving to {}'.format(savepath))
     
 # Task params
-precision_hard = np.pi/180
+precision_hard = np.pi/60
 precision_easy = np.pi/18
-weight_scale = 0.05
+v1_weight_scale = 0.5
+v4_weight_scale = 1
 learning_rate = 0.01
-iterations = 10000
+iterations = 20000
 inp_size = 33
 v1_size = 11
 v1_orientation_number = 32
@@ -35,7 +36,7 @@ phis = True
 sfs = False
 random_sf = False
 
-paramdict= {'precision_hard' : precision_hard, 'precision_easy':precision_easy, 'weight_scalar': weight_scale, 'learning_rate':learning_rate, 'train_iters':iterations,
+paramdict= {'precision_hard' : precision_hard, 'precision_easy':precision_easy, 'v1_weight_scalar': v1_weight_scale, 'v4_weight_scalar': v4_weight_scale, 'learning_rate':learning_rate, 'train_iters':iterations,
            'input_size':inp_size,'v1_size':v1_size,'v1_orientation_number':v1_orientation_number,'v4_size':v4_size,'v4_stride':v4_stride,
             'v4_orientation_number':v4_orientation_number,'phis_sfs':phis_sfs,'training_size':training_size,'phis':phis,'sfs':sfs, 'random_sf':random_sf}
 np.save(savepath + '/params',paramdict)
@@ -48,7 +49,7 @@ schoups_net = LCN_model.LCN(
     input_size = inp_size, v1_size = v1_size, v1_orientation_number = v1_orientation_number,
     v4_size = v4_size, v4_stride = v4_stride, v4_orientation_number= v4_orientation_number,
     phis_sfs = phis_sfs, training_size = training_size, phis = phis, sfs = sfs,
-    alpha = learning_rate, rescale = weight_scale)
+    alpha = learning_rate, v1_rescale = v1_weight_scale, v4_rescale = v4_weight_scale)
 
 schoups_net.transfer_inputting(-precision_hard, precision_hard, v1_size, v1_size, random_sf = random_sf)
 schoups_net.desired_outputting()
