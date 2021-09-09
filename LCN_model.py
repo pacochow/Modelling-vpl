@@ -14,7 +14,7 @@ import logging
 
 class LCN(nn.Module):
     
-    def __init__(self, input_size, v1_size, v1_orientation_number, v4_size, v4_stride, v4_orientation_number, phis_sfs, training_size, phis = True, sfs = False, alpha = 0.01, v1_rescale = 1, v4_rescale = 1):
+    def __init__(self, input_size, v1_size, v1_orientation_number, v4_size, v4_stride, v4_orientation_number, phis_sfs, training_size, phis = True, sfs = False, alpha = 0.01, v1_rescale = 1, phase_rescale = 1, v4_rescale = 1):
 
         """
         Initialize network parameters.
@@ -41,6 +41,7 @@ class LCN(nn.Module):
         self.phis = phis # Boolean – True if pooling over phase
         self.sfs = sfs # Boolean – True if pooling over sf
         self.v1_rescale = v1_rescale # scalar multiplier for scaling of V1 weights, defaults to 1 (no scaling)
+        self.phase_rescale = phase_rescale # scalar multiplier for scaling of phase pooling, defaults to 1 (no scaling)
         self.v4_rescale = v4_rescale # scalar multiplier for scaling of V4 weights, defaults to 1 (no scaling)
         
         self.training_size = training_size # Batch size
@@ -199,6 +200,9 @@ class LCN(nn.Module):
         
         self.labels = []
         self.inputs = []
+        
+        self.trained_phis = np.linspace(0, np.pi, 10) # Use phases regularly spaced across 0 to pi
+        self.trained_sfs = []
     
         self.angle1 = angle1
         self.angle2 = angle2
@@ -207,7 +211,7 @@ class LCN(nn.Module):
         for angle in [angle1, angle2]:
             for i in range(int(self.training_size/2)):
                 theta = angle
-                phi = np.random.uniform(0, np.pi) # Randomize phase of input stimuli
+                phi = self.trained_phis[i]
                 kernel = self.generate_gabor(self.input_size, theta, phi, 5, random_sf = random_sf) 
                 self.inputs.append(kernel)
 
@@ -247,27 +251,24 @@ class LCN(nn.Module):
         self.train_x_location = x_location
         self.train_y_location = y_location
         
-        self.trained_phis = []
+        self.trained_phis = np.linspace(0, np.pi, 10) # Use phases regularly spaced across 0 to pi
         self.trained_sfs = []
-        
-        # Create list of orientations for input gabor stimuli
-        x = self.remove_ambiguous_stimuli(angle1, angle2, self.training_size, even_space = False) 
 
         # For each orientation, create input gabor stimulus at that orientation at particular location
-        for i in range(self.training_size):
-            theta = x[i]
-            phi = np.random.uniform(0, np.pi) # Randomize phase of input stimuli
-            self.trained_phis.append(phi)
-            kernel = self.generate_location_gabor(theta, phi, 5, x_location, y_location, random_sf = random_sf)
-            self.trained_sfs.append(self.lamda)
-            self.inputs.append(kernel)
-            
-            # Label stimulus as 0 if it is clockwise to reference orientation of 0 and 1 if counterclockwise
-            if 0 < theta < np.pi/2: 
-                label = torch.tensor([0])
-            else:
-                label = torch.tensor([1])
-            self.labels.append(label)
+        for angle in [angle1, angle2]:
+            for i in range(int(self.training_size/2)):
+                theta = angle
+                phi = self.trained_phis[i]
+                kernel = self.generate_location_gabor(theta, phi, 5, x_location, y_location, random_sf = random_sf)
+                self.trained_sfs.append(self.lamda)
+                self.inputs.append(kernel)
+
+                # Label stimulus as 0 if it is clockwise to reference orientation of 0 and 1 if counterclockwise
+                if 0 < theta < np.pi/2: 
+                    label = torch.tensor([0])
+                else:
+                    label = torch.tensor([1])
+                self.labels.append(label)
             
         # Stack all input gabor stimuli into one tensor
         self.input = torch.stack(self.inputs).view(self.training_size, 1, self.input_size, self.input_size)#.to(self.device) 
@@ -305,7 +306,7 @@ class LCN(nn.Module):
             relu = F.relu(out[0][i:i+self.phis_sfs]) 
             
             # Sum all of these activation maps after relu 
-            pool = (torch.sum(relu, dim = 0)/(self.phis_sfs)).view(1, self.v1_dimensions, self.v1_dimensions) 
+            pool = (torch.sum(relu, dim = 0) * self.phase_rescale / self.phis_sfs).view(1, self.v1_dimensions, self.v1_dimensions) 
             pools.append(pool)
         pools = torch.stack(pools).view(self.v1_orientation_number, self.v1_dimensions, self.v1_dimensions)
         
@@ -350,10 +351,19 @@ class LCN(nn.Module):
             if i % 50 == 0:
                 logger.info('Iterations completed: {:.0f}'.format(i))
             
-            # End training if performance reaches over 85% 
-            if len(self.training_scores) != 0 and self.training_scores[-1] >= 85:
-                logger.info('Training terminated at {:.0f} iterations, {:.0f}% training performance reached'.format(i, self.training_scores[-1]))
-                break
+#             # End training if performance reaches over 85% 
+#             if len(self.training_scores) != 0 and self.training_scores[-1] >= 85:
+#                 logger.info('Training terminated at {:.0f} iterations, {:.0f}% training performance reached'.format(i, self.training_scores[-1]))
+#                 break
+            
+            # End training if performance reaches 100%
+#             if len(self.training_scores) != 0 and self.training_scores[-1] == 100:
+#                 logger.info('Training terminated at {:.0f} iterations, {:.0f}% training performance reached'.format(i, self.training_scores[-1]))
+#                 break
+             
+#             if len([a for a in self.training_scores if a == 100]) >= 100:
+#                 logger.info('Training terminated at {:.0f} iterations, {:.0f}% training performance reached'.format(i, self.training_scores[-1]))
+#                 break
                 
             optimizer.zero_grad() # Reset gradients each iteration
             self.training_score = 0 
@@ -703,10 +713,10 @@ class LCN(nn.Module):
         with torch.no_grad():
             for i in tqdm(range(len(x))):
                 for orientation in range(self.v1_orientation_number):
-                    for sf in range(self.phis_sfs):
-                        for horizontal in range(len(self.simple_weight[0][self.phis_sfs * orientation + sf][0])):
+                    for phi in range(self.phis_sfs):
+                        for horizontal in range(len(self.simple_weight[0][self.phis_sfs * orientation + phi][0])):
                             for vertical in range(
-                                len(self.simple_weight[0][self.phis_sfs * orientation + sf][0][horizontal])):
+                                len(self.simple_weight[0][self.phis_sfs * orientation + phi][0][horizontal])):
                                 
                                 # Create gabor
                                 test = self.generate_gabor(self.v1_size, x[i], 0, 5).view(
@@ -714,17 +724,17 @@ class LCN(nn.Module):
                                 
                                 # Present to specific gabor after training
                                 result = torch.sum(
-                                    self.simple_weight[0][self.phis_sfs * orientation + sf][0][horizontal][vertical].view(
+                                    self.simple_weight[0][self.phis_sfs * orientation + phi][0][horizontal][vertical].view(
                                         self.v1_size, self.v1_size) * test)
                                 
                                 # Present to specific gabor before training
                                 initial_result = torch.sum(
-                                    self.before_v1weight[0][self.phis_sfs * orientation + sf][0][horizontal][vertical].view(
+                                    self.before_v1weight[0][self.phis_sfs * orientation + phi][0][horizontal][vertical].view(
                                         self.v1_size, self.v1_size) * test)
                                 
                                 # Save activity in tensor
-                                self.results[orientation][sf][horizontal][vertical][i] = result
-                                self.initial_tuning_curves[orientation][sf][horizontal][vertical][i] = initial_result
+                                self.results[orientation][phi][horizontal][vertical][i] = result
+                                self.initial_tuning_curves[orientation][phi][horizontal][vertical][i] = initial_result
 
         # Normalize tuning curves to – divide by maximum point on curve if tuning curve is positive and minimum point if tuning curve is negative 
 #         for j in range(self.phis_sfs):
@@ -1340,6 +1350,13 @@ class LCN(nn.Module):
         self.v4_mean_after_slope = np.mean(self.v4_after_slopes)
         self.v4_mean_before_slope = np.mean(self.v4_before_slopes)
         
+        # Calculate slope differences before and after training
+        self.v1_diff = [self.v1_mean_after_slopes[i] - self.v1_mean_before_slopes[i] for i in range(self.v1_orientation_number)]
+        self.v4_diff = [self.v4_after_slopes[i] - self.v4_before_slopes[i] for i in range(self.v4_orientation_number)]
+        
+        self.v1_max_diff = np.max(self.v1_diff)
+        self.v4_max_diff = np.max(self.v4_diff)
+        
     def plot_otc_curve(self):
         
         """
@@ -1363,10 +1380,6 @@ class LCN(nn.Module):
         Plots difference between slopes of orientation tuning curves against absolute difference between trained angle and 
         preferred angle before and after training.  
         """
-       
-        # Calculate slope differences before and after training
-        self.v1_diff = [self.v1_mean_after_slopes[i] - self.v1_mean_before_slopes[i] for i in range(self.v1_orientation_number)]
-        self.v4_diff = [self.v4_after_slopes[i] - self.v4_before_slopes[i] for i in range(self.v4_orientation_number)]
         
         if absolute_diff == True:
             # Calculate absolute difference between trained angle and preferred angle and sort lists
