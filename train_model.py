@@ -12,7 +12,7 @@ from utils import funcs
 
 logger = funcs.initLogger('train_log','train_log.log')
 
-savepath = 'trained_models/automated/weight_scale_01_001_5/' #path to existing directory for saving trained models
+savepath = 'trained_models/automated/weight_scale_001_001_5/' #path to existing directory for saving trained models
 if not funcs.path_exists(savepath):
     raise ValueError('Save directory does not exist! Create directory or amend savepath')
 logger.info('Model save path validated - saving to {}'.format(savepath))
@@ -20,11 +20,11 @@ logger.info('Model save path validated - saving to {}'.format(savepath))
 # Task params
 precision_hard = np.pi/60
 precision_easy = np.pi/18
-v1_weight_scale = 0.1
+v1_weight_scale = 0.01
 phase_weight_scale = 0.01
 v4_weight_scale = 5
 learning_rate = 0.01
-iterations = 10000
+iterations = 100
 inp_size = 33
 v1_size = 11
 v1_orientation_number = 32
