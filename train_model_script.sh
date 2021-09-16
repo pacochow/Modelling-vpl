@@ -1,6 +1,7 @@
 #!/bin/bash
 #$ -q short.qc 
-#$-j y 
+#$ -j y
+#$ -r no 
 #$ -o /well/saxe/users/qbe080/logs 
 #$ -wd /well/saxe/users/qbe080/Biomed-Research-Project
 

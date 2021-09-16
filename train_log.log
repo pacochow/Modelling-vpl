@@ -11007,3 +11007,9 @@
 2021-09-15 11:00:44,010 - Iterations completed: 50
 2021-09-15 11:03:45,027 - Iterations completed: 100
 2021-09-15 11:06:47,076 - Iterations completed: 150
+2021-09-16 14:54:11,768 - Model save path validated - saving to trained_models/automated/weight_scale_001_001_5/
+2021-09-16 14:54:15,484 - Schoups net initialized
+2021-09-16 14:54:15,511 - Iterations completed: 0
+2021-09-16 14:56:15,508 - Iterations completed: 50
+2021-09-16 15:05:17,800 - Schoups net training complete - 100 iterations
+2021-09-16 15:05:17,904 - Schoups model saved to trained_models/automated/weight_scale_001_001_5/
