@@ -15,6 +15,9 @@ import matplotlib.pylab as pl
 
 class LCN(nn.Module):
     
+    def test(self):
+        print('test')
+    
     def __init__(self, input_size, v1_size, v1_orientation_number, v4_size, v4_stride, v4_orientation_number, phis, 
                  training_size, alpha = 0.01, v1_rescale = 1, phase_rescale = 1, v4_rescale = 1, 
                  v1_gamma = 0.5, v4_orientation_std = 0.7):
