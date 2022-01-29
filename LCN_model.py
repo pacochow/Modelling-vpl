@@ -15,9 +15,6 @@ import matplotlib.pylab as pl
 
 class LCN(nn.Module):
     
-    def test(self):
-        print('test')
-    
     def __init__(self, input_size, v1_size, v1_orientation_number, v4_size, v4_stride, v4_orientation_number, phis, 
                  training_size, alpha = 0.01, v1_rescale = 1, phase_rescale = 1, v4_rescale = 1, 
                  v1_gamma = 0.5, v4_orientation_std = 0.7):
@@ -105,7 +102,7 @@ class LCN(nn.Module):
         frequencies, depending on what is chosen when initializing network. Returns torch tensor weights.
         """        
         # Create range of orientations between -pi/2 and pi/2 for each V1 gabor that are equally spaced and symmetrical around 0
-        self.v1_angles = np.linspace(-np.pi/2 + np.pi/(2 * self.v1_orientation_number), np.pi/2 - np.pi/(2 * self.v1_orientation_number), self.v1_orientation_number)
+        self.v1_angles = np.linspace(-np.pi/2, np.pi/2, self.v1_orientation_number)
         # Create range of phases between 0 and pi for each V1 gabor
         self.phis_range = np.linspace(0, np.pi, self.phis) 
         self.sfs_range = [5, 9]
@@ -135,7 +132,7 @@ class LCN(nn.Module):
         Initialize V4 weights with gaussian filters. Returns torch tensor weights.
         """
         # Create range of orientations between -pi/2 and pi/2 for each V4 filter
-        self.v4_angles = np.linspace(-np.pi/2 + np.pi/(2 * self.v4_orientation_number), np.pi/2 - np.pi/(2 * self.v4_orientation_number), self.v4_orientation_number)
+        self.v4_angles = np.linspace(-np.pi/2, np.pi/2, self.v4_orientation_number)
         
         x = np.linspace(-np.pi/2, np.pi/2, self.v1_orientation_number)
         
@@ -308,7 +305,7 @@ class LCN(nn.Module):
             pool = (torch.sqrt(torch.sum(pool, dim = 0)) * self.phase_rescale/self.phis).view(1, self.v1_dimensions, self.v1_dimensions) 
             phase_pools.append(pool)
         out = torch.stack(phase_pools).view(self.v1_orientation_number * self.sfs, self.v1_dimensions, self.v1_dimensions)
-        
+
         sf_pools = []
         for i in range(0, self.v1_orientation_number*self.sfs, self.sfs):
             # Pick all activation maps with same orientation but different sfs
@@ -318,7 +315,7 @@ class LCN(nn.Module):
             pool = (torch.sum(pool, dim = 0) / self.sfs).view(1, self.v1_dimensions, self.v1_dimensions) 
             sf_pools.append(pool)
         sf_pools = torch.stack(sf_pools).view(self.v1_orientation_number, self.v1_dimensions, self.v1_dimensions)
-        
+
         # V4 pooling
         v4_pools = []
         
@@ -334,11 +331,12 @@ class LCN(nn.Module):
        
         # Apply RELU
         v4_pool = F.relu(v4_pool)
-        
+
         # Feed flattened activation maps into decision layer
         out = v4_pool.view(1, self.v4_orientation_number * self.v4_dimensions * self.v4_dimensions)
         out = self.decision(out.float()) 
         out = F.softmax(out, dim = 1)
+
         return out
     
     def train(self, iterations, optimizer):
@@ -888,9 +886,9 @@ class LCN(nn.Module):
             # Plot each difference in tuning curve at different orientations with specified phase/sf and position
             for i in range(self.v1_orientation_number):
                 if color == True:
-                    plt.plot(x, difference[i, phi_sf, position, position, :], color = colors[i])
+                    plt.plot(x, difference[i, sf, phi, position, position, :], color = colors[i])
                 else:
-                    plt.plot(x, difference[i, phi_sf, position, position, :])
+                    plt.plot(x, difference[i, sf, phi, position, position, :])
             
             # Create legend
             plt.legend([round(self.v1_angles[i] * 180 / np.pi, 1) for i in range(self.v1_orientation_number)])
@@ -1095,7 +1093,14 @@ class LCN(nn.Module):
         self.before_bandwidths = []
         
         self.xs = [i for i in range(self.tuning_curve_sample)]
+        
+        angles = np.linspace(-np.pi/2, np.pi/2, self.v1_orientation_number)
+        threshold1 = self.angle1 - np.pi/8
+        threshold2 = self.angle2 + np.pi/8
+        
         for i in range(self.v1_orientation_number):
+            if not threshold1 <= angles[i] <= threshold2:
+                continue
             for sf in range(self.sfs):
                 for j in range(self.phis):
                 
@@ -1149,7 +1154,7 @@ class LCN(nn.Module):
                         bandwidth = x[halfmax_index1] - x[halfmax_index2]
                     else:
                         bandwidth = ((b-a)*180/np.pi) - np.abs(x[halfmax_index1] - x[halfmax_index2])
-                    self.before_bandwidths.append(bandwidth/2)
+                    self.after_bandwidths.append(bandwidth/2)
 
                     # Calculate tuning curve parameters before training
 
@@ -1189,7 +1194,7 @@ class LCN(nn.Module):
                         bandwidth2 = x[halfmax2_index1] - x[halfmax2_index2]
                     else:
                         bandwidth2 = ((b-a)*180/np.pi) - np.abs(x[halfmax2_index1] - x[halfmax2_index2])
-                    self.after_bandwidths.append(bandwidth2/2)
+                    self.before_bandwidths.append(bandwidth2/2)
                 
         # Calculate mean and standard deviation of the ampltiude and bandwidth of each v1 curves before and after training
         self.v1_mean_after_amplitude = np.mean(self.after_amplitudes)
@@ -1228,9 +1233,16 @@ class LCN(nn.Module):
         self.before_amplitudes = []
         self.before_bandwidths = []
         
+        angles = np.linspace(-np.pi/2, np.pi/2, self.v4_orientation_number)
+        threshold1 = self.angle1 - np.pi/4
+        threshold2 = self.angle2 + np.pi/4
+        
         self.xs = [i for i in range(self.tuning_curve_sample)]
         for i in range(self.v4_orientation_number):
-
+            
+            if not threshold1 <= angles[i] <= threshold2:
+                continue
+            
             # Calculate tuning curve parameters after training
                 
             # Set tuning curve at particular orientation and position after training
