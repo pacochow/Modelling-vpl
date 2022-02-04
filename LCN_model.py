@@ -102,7 +102,7 @@ class LCN(nn.Module):
         frequencies, depending on what is chosen when initializing network. Returns torch tensor weights.
         """        
         # Create range of orientations between -pi/2 and pi/2 for each V1 gabor that are equally spaced and symmetrical around 0
-        self.v1_angles = np.linspace(-np.pi/2, np.pi/2, self.v1_orientation_number)
+        self.v1_angles = np.linspace(-np.pi/2 + np.pi/(2 * self.v1_orientation_number), np.pi/2 - np.pi/(2 * self.v1_orientation_number), self.v1_orientation_number)
         # Create range of phases between 0 and pi for each V1 gabor
         self.phis_range = np.linspace(0, np.pi, self.phis) 
         self.sfs_range = [5, 9]
@@ -132,7 +132,7 @@ class LCN(nn.Module):
         Initialize V4 weights with gaussian filters. Returns torch tensor weights.
         """
         # Create range of orientations between -pi/2 and pi/2 for each V4 filter
-        self.v4_angles = np.linspace(-np.pi/2, np.pi/2, self.v4_orientation_number)
+        self.v4_angles = np.linspace(-np.pi/2 + np.pi/(2 * self.v4_orientation_number), np.pi/2 - np.pi/(2 * self.v4_orientation_number), self.v4_orientation_number)
         
         x = np.linspace(-np.pi/2, np.pi/2, self.v1_orientation_number)
         
@@ -418,41 +418,40 @@ class LCN(nn.Module):
             self.generalize_perform.append(self.generalization_score)
             self.generalize_error.append(self.general_mean_error)
 
-            if i % 500 == 0 or i == iterations - 1:
-                self.v1_tuning_curve()
-                self.v4_tuning_curve()
-                self.otc_curve(v1_position_1 = 11, v1_position_2 = 11, v4_position_1 = 1, v4_position_2 = 1)
-                self.v1_otc_max_diffs.append(self.v1_max_diff)
-                self.v4_otc_max_diffs.append(self.v4_max_diff)
+        # Generate tuning curves
+        self.v1_tuning_curve()
+        self.v4_tuning_curve()
+            
+#             if i % 500 == 0 or i == iterations - 1:
+#                 self.v1_tuning_curve()
+#                 self.v4_tuning_curve()
+#                 self.otc_curve(v1_position_1 = 11, v1_position_2 = 11, v4_position_1 = 1, v4_position_2 = 1)
+#                 self.v1_otc_max_diffs.append(self.v1_max_diff)
+#                 self.v4_otc_max_diffs.append(self.v4_max_diff)
                     
                     
-            if i % 1000 == 0 or i == iterations - 1:
-                self.v1_tuning_curve()
-                self.v4_tuning_curve()
-                if i == iterations - 1:
-                    for a in range(self.v1_dimensions):
-                        for b in range(self.v1_dimensions):
-                            self.otc_curve(v1_position_1 = a, v1_position_2 = b, v4_position_1 = 1, v4_position_2 = 1)
-                            self.v1_spatial_heatmap[int((i+1)/1000)][a][b] = self.v1_max_diff
-                    for c in range(self.v4_dimensions):
-                        for d in range(self.v4_dimensions):
-                            self.otc_curve(v1_position_1 = 11, v1_position_2 = 11, v4_position_1 = c, v4_position_2 = d)
-                            self.v4_spatial_heatmap[int((i+1)/1000)][c][d] = self.v4_max_diff
-                else:       
-                    for a in range(self.v1_dimensions):
-                        for b in range(self.v1_dimensions):
-                            self.otc_curve(v1_position_1 = a, v1_position_2 = b, v4_position_1 = 1, v4_position_2 = 1)
-                            self.v1_spatial_heatmap[int(i/1000)][a][b] = self.v1_max_diff
-                    for c in range(self.v4_dimensions):
-                        for d in range(self.v4_dimensions):
-                            self.otc_curve(v1_position_1 = 11, v1_position_2 = 11, v4_position_1 = c, v4_position_2 = d)
-                            self.v4_spatial_heatmap[int(i/1000)][c][d] = self.v4_max_diff
+#             if i % 1000 == 0 or i == iterations - 1:
+#                 self.v1_tuning_curve()
+#                 self.v4_tuning_curve()
+#                 if i == iterations - 1:
+#                     for a in range(self.v1_dimensions):
+#                         for b in range(self.v1_dimensions):
+#                             self.otc_curve(v1_position_1 = a, v1_position_2 = b, v4_position_1 = 1, v4_position_2 = 1)
+#                             self.v1_spatial_heatmap[int((i+1)/1000)][a][b] = self.v1_max_diff
+#                     for c in range(self.v4_dimensions):
+#                         for d in range(self.v4_dimensions):
+#                             self.otc_curve(v1_position_1 = 11, v1_position_2 = 11, v4_position_1 = c, v4_position_2 = d)
+#                             self.v4_spatial_heatmap[int((i+1)/1000)][c][d] = self.v4_max_diff
+#                 else:       
+#                     for a in range(self.v1_dimensions):
+#                         for b in range(self.v1_dimensions):
+#                             self.otc_curve(v1_position_1 = a, v1_position_2 = b, v4_position_1 = 1, v4_position_2 = 1)
+#                             self.v1_spatial_heatmap[int(i/1000)][a][b] = self.v1_max_diff
+#                     for c in range(self.v4_dimensions):
+#                         for d in range(self.v4_dimensions):
+#                             self.otc_curve(v1_position_1 = 11, v1_position_2 = 11, v4_position_1 = c, v4_position_2 = d)
+#                             self.v4_spatial_heatmap[int(i/1000)][c][d] = self.v4_max_diff
 
-
-
-#         Generate tuning curves    
-#         self.v1_tuning_curve() 
-#         self.v4_tuning_curve() 
         
     def double_train(self, iterations, optimizer, angle1, angle2, x_location, y_location):
         
@@ -1094,13 +1093,16 @@ class LCN(nn.Module):
         
         self.xs = [i for i in range(self.tuning_curve_sample)]
         
-        angles = np.linspace(-np.pi/2, np.pi/2, self.v1_orientation_number)
+        angles = np.linspace(-np.pi/2 + np.pi/(2 * self.v1_orientation_number), np.pi/2 - np.pi/(2 * self.v1_orientation_number), self.v1_orientation_number)
         threshold1 = self.angle1 - np.pi/8
         threshold2 = self.angle2 + np.pi/8
         
         for i in range(self.v1_orientation_number):
+            
+            # Only calculate parameters between trained angle ± 22.5°
             if not threshold1 <= angles[i] <= threshold2:
                 continue
+                
             for sf in range(self.sfs):
                 for j in range(self.phis):
                 
@@ -1233,13 +1235,14 @@ class LCN(nn.Module):
         self.before_amplitudes = []
         self.before_bandwidths = []
         
-        angles = np.linspace(-np.pi/2, np.pi/2, self.v4_orientation_number)
+        angles = np.linspace(-np.pi/2 + np.pi/(2 * self.v4_orientation_number), np.pi/2 - np.pi/(2 * self.v4_orientation_number), self.v4_orientation_number)
         threshold1 = self.angle1 - np.pi/4
         threshold2 = self.angle2 + np.pi/4
         
         self.xs = [i for i in range(self.tuning_curve_sample)]
         for i in range(self.v4_orientation_number):
             
+            # Only calculate parameters between trained angle ± 45°
             if not threshold1 <= angles[i] <= threshold2:
                 continue
             
