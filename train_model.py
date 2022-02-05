@@ -15,18 +15,20 @@ from itertools import repeat
 
 logger = funcs.initLogger('train_log','train_log.log')
 
-network_name = "Schoups"
+# network_name = "Low precision"
 
 # Task params
 precision_hard = np.pi/60
 precision_easy = np.pi/18
 # scales = [0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10]
+# scales = [0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.25]
 scales = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25]
 v1_weight_scales = scales * len(scales)
-phase_weight_scale = 0.05
+phase_weight_scale = 0.01
 v4_weight_scales = [x for item in scales for x in repeat(item, len(scales))]
-# v1_weight_scale = 0.75
-# v4_weight_scale = 2
+# phase_weight_scales = [0.001, 0.003, 0.005, 0.008, 0.01, 0.03, 0.05, 0.08, 0.1, 0.3, 0.5, 0.8, 1]
+# v1_weight_scale = 1.25
+# v4_weight_scale = 1.25
 learning_rate = 0.01
 iterations = 10000
 inp_size = 33
@@ -48,9 +50,11 @@ v4_orientation_std = 0.7
 # v4_orientation_std = v4_orientation_stds[int(sys.argv[1]) - 1]
 v1_weight_scale = v1_weight_scales[int(sys.argv[1]) - 1]
 v4_weight_scale = v4_weight_scales[int(sys.argv[1]) - 1]
+# phase_weight_scale = phase_weight_scales[int(sys.argv[1]) - 1]
 
-folder_savepath = 'trained_models/high_fixed_normalized_2_new/weight_scale_' + str(v1_weight_scale).replace('.', '') + "_" + str(phase_weight_scale).replace('.', '') + "_" + str(v4_weight_scale).replace('.', '') #path to existing directory for saving trained models
-savepath = folder_savepath + '/' + network_name + '_32_orientations_model_' 
+folder_savepath = 'trained_models/low_fixed_normalized/weight_scale_' + str(v1_weight_scale).replace('.', '') + "_" + str(phase_weight_scale).replace('.', '') + "_" + str(v4_weight_scale).replace('.', '') #path to existing directory for saving trained models
+# folder_savepath = 'trained_models/changing_phase_pool_weights/' + str(phase_weight_scale)
+savepath = folder_savepath + '/' 
 
 # savepath = 'trained_models/automated_stds/' + str(v1_gamma).replace('.', '') + "_"+ str(v4_orientation_std).replace('.', '') + '/' #path to existing directory for saving trained models
 
@@ -76,7 +80,7 @@ while done == False:
         phase_rescale = phase_weight_scale, v4_rescale = v4_weight_scale, v1_gamma = v1_gamma, 
         v4_orientation_std = v4_orientation_std)
 
-    net.transfer_inputting(-precision_hard, precision_hard, v1_size, v1_size, random_sf = random_sf)
+    net.transfer_inputting(-precision_easy, precision_easy, v1_size, v1_size, random_sf = random_sf)
     net.desired_outputting()
     optimizer = optim.SGD(net.parameters(), lr = net.alpha)
     logger.info('Network initialized')
@@ -91,7 +95,7 @@ while done == False:
     logger.info('Network training complete - {} iterations'.format(iterations))
 
 # SAVE
-torch.save(net.state_dict(),savepath[:-1] + ".pt")
+torch.save(net.state_dict(),savepath + "model.pt")
 torch.save(net.losses,savepath + "loss.pt")
 torch.save(net.training_scores,savepath + "performance.pt")
 torch.save(net.v1_weight_changes,savepath + "v1_weight_change.pt")
@@ -106,8 +110,8 @@ torch.save(net.generalize_error,savepath + "generalization_error.pt")
 torch.save(net.trained_phis,savepath + "phases.pt")
 torch.save(net.trained_sfs,savepath + "sfs.pt")
 torch.save(net.v1_angles,savepath + "v1_angles.pt")
-torch.save(net.v1_otc_max_diffs,savepath + "v1_otc_max_diffs.pt")
-torch.save(net.v4_otc_max_diffs,savepath + "v4_otc_max_diffs.pt")
+# torch.save(net.v1_otc_max_diffs,savepath + "v1_otc_max_diffs.pt")
+# torch.save(net.v4_otc_max_diffs,savepath + "v4_otc_max_diffs.pt")
 
 
 net.otc_curve(v1_position_1 = int((net.v1_dimensions - 1) / 2), v1_position_2 = int((net.v1_dimensions - 1) / 2), v4_position_1 = int((net.v4_dimensions - 1) / 2), v4_position_2 = int((net.v4_dimensions - 1) / 2))
@@ -117,12 +121,14 @@ net.v4_tuning_params(position = int((net.v4_dimensions - 1) / 2))
         
 torch.save(net.v1_max_diff, savepath + "v1_max_diff.pt")
 torch.save(net.v4_max_diff, savepath + "v4_max_diff.pt")
+torch.save(net.v1_amplitude_difference, savepath + "v1_amplitude.pt")
+torch.save(net.v4_amplitude_difference, savepath + "v4_amplitude.pt")
 torch.save(net.v1_bandwidth_difference, savepath + "v1_bandwidth.pt")
 torch.save(net.v4_bandwidth_difference, savepath + "v4_bandwidth.pt")
-torch.save(net.v1_binary_heatmap,savepath + "v1_binary_heatmap.pt")
-torch.save(net.v4_binary_heatmap,savepath + "v4_binary_heatmap.pt")
-torch.save(net.v1_spatial_heatmap,savepath + "v1_spatial_heatmap.pt")
-torch.save(net.v4_spatial_heatmap,savepath + "v4_spatial_heatmap.pt")
+# torch.save(net.v1_binary_heatmap,savepath + "v1_binary_heatmap.pt")
+# torch.save(net.v4_binary_heatmap,savepath + "v4_binary_heatmap.pt")
+# torch.save(net.v1_spatial_heatmap,savepath + "v1_spatial_heatmap.pt")
+# torch.save(net.v4_spatial_heatmap,savepath + "v4_spatial_heatmap.pt")
 # torch.save(net.v1_max_diff_angle, savepath + "v1_max_diff_angle.pt")
 # torch.save(net.v4_max_diff_angle, savepath + "v4_max_diff_angle.pt")
 # torch.save(net.v1_mean_before_bandwidth, savepath + "v1_bandwidth.pt")
@@ -148,17 +154,16 @@ plt.savefig(savepath + "tuning_curves.png")
 
 plt.figure(figsize = [10, 10])
 net.plot_otc_curve()
-plt.title(network_name + ' model')
 plt.savefig(savepath + "OTC.png")
 
 # plt.figure(figsize = [35, 35])
 # plt.subplot(3, 3, 1)
 # net.plot_otc_curve()
-# plt.title(network_name + " model OTC")
+# plt.title(network_name + " OTC")
             
 # plt.subplot(3, 3, 2)
 # net.plot_otc_curve_diff(absolute_diff = False)
-# plt.title(network_name + " model OTC diff")
+# plt.title(network_name + " OTC diff")
 # plt.savefig(savepath + "OTC.png")
             
 

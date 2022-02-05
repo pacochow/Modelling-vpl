@@ -302,7 +302,7 @@ class LCN(nn.Module):
             pool = out[0][i:i+self.phis] ** 2
             
             # Sum all of these activation maps 
-            pool = (torch.sqrt(torch.sum(pool, dim = 0)) * self.phase_rescale/self.phis).view(1, self.v1_dimensions, self.v1_dimensions) 
+            pool = (torch.sqrt(torch.sum(pool, dim = 0)) * self.phase_rescale / self.phis).view(1, self.v1_dimensions, self.v1_dimensions) 
             phase_pools.append(pool)
         out = torch.stack(phase_pools).view(self.v1_orientation_number * self.sfs, self.v1_dimensions, self.v1_dimensions)
 
@@ -311,7 +311,7 @@ class LCN(nn.Module):
             # Pick all activation maps with same orientation but different sfs
             pool = out[i:i+self.sfs] 
             
-            # Mean sumSum all of these activation maps  
+            # Mean sum all of these activation maps  
             pool = (torch.sum(pool, dim = 0) / self.sfs).view(1, self.v1_dimensions, self.v1_dimensions) 
             sf_pools.append(pool)
         sf_pools = torch.stack(sf_pools).view(self.v1_orientation_number, self.v1_dimensions, self.v1_dimensions)
@@ -798,9 +798,9 @@ class LCN(nn.Module):
         
         """
         Plot tuning curves at a particular orientation index or phase/spatial frequeny index and at a particular 
-        filter position. Setting orientations = True plots tuning curves at all orientations at a specified phase/
-        spatial frequency. Setting phi_sfs = True plots tuning curves at all phases/spatial frequencies (determined
-        during network initialization) at a specified orientation. Setting differences = True plots difference in
+        filter position. Setting orientations = True plots tuning curves at all orientations at a specified phase and
+        sf. Setting sf = True plots tuning curves at all sfs at a specified orientation and phase. Setting phi = True plots 
+        tuning curves at all phases at a specified orientation and sf. Setting differences = True plots difference in
         responses using initial V1 simple cell weights and trained weights. Setting color = True plots the curves in a gradient 
         of colors.
         """
