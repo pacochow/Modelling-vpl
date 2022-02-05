@@ -9,11 +9,12 @@ import torch.nn.functional as F
 import torch.optim as optim
 import cv2
 from tqdm import tqdm
+import matplotlib.pylab as pl
 
 class convnet(nn.Module):
     
-    def __init__(self, input_size, v1_size, v1_orientation_number, v4_size, v4_stride, v4_orientation_number, phis_sfs, 
-                 training_size, phis = True, sfs = False, alpha = 0.01, v1_rescale = 1, phase_rescale = 1, v4_rescale = 1,
+    def __init__(self, input_size, v1_size, v1_orientation_number, v4_size, v4_stride, v4_orientation_number, phis, 
+                 training_size, alpha = 0.01, v1_rescale = 1, phase_rescale = 1, v4_rescale = 1,
                  v1_gamma = 0.5, v4_orientation_std = 0.7):
         
         """
@@ -37,9 +38,8 @@ class convnet(nn.Module):
         self.input_size = input_size # Size of input gabors (pixels)
         self.v1_orientation_number = v1_orientation_number # Number of V1 gabor filters at different orientations
         self.v1_size = v1_size # Size of V1 gabor filters (pixels)
-        self.phis_sfs = phis_sfs # Number of V1 gabor filters at different phases/sfs depending on phis = True or sfs = True
-        self.phis = phis # Boolean – True if pooling over phase
-        self.sfs = sfs # Boolean – True if pooling over sf
+        self.phis = phis # Number of V1 gabor filters at different phases
+        self.sfs = 2 # Number of V1 gabor filters at different sfs
         self.v1_rescale = v1_rescale # scalar multiplier for scaling of V1 weights, defaults to 1 (no scaling)
         self.phase_rescale = phase_rescale # scalar multiplier for scaling of phase pooling, defaults to 1 (no scaling)
         self.v4_rescale = v4_rescale # scalar multiplier for scaling of V4 weights, defaults to 1 (no scaling)
@@ -58,7 +58,7 @@ class convnet(nn.Module):
         self.ambiguous = [-np.pi/2, 0, np.pi/2, np.pi] # List of ambiguous gabor angles that needs to be removed
         
         # Initialising V1 weights – learnable parameter 
-        self.simple_weight = nn.Conv2d(1, self.v1_orientation_number * self.phis_sfs, self.v1_size, bias = False)
+        self.simple_weight = nn.Conv2d(1, self.v1_orientation_number * self.sfs * self.phis, self.v1_size, bias = False)
         self.simple_weight.weight.data = self.init_weights()
         
         # Initialising V4 weights – learnable parameter
@@ -71,7 +71,7 @@ class convnet(nn.Module):
         
         # Saving initial weights
         self.before_v1weight = self.simple_weight.weight.clone()
-        self.simple_weight_before = nn.Conv2d(1, self.v1_orientation_number * self.phis_sfs, self.v1_size, bias = False)
+        self.simple_weight_before = nn.Conv2d(1, self.v1_orientation_number * self.phis, self.v1_size, bias = False)
         self.simple_weight_before.weight.data = self.before_v1weight
         
         self.before_v4weight = self.v4_weight.weight.clone()
@@ -92,25 +92,25 @@ class convnet(nn.Module):
         # Create range of orientations between -pi/2 and pi/2 for each V1 gabor that are equally spaced and symmetrical around 0
         self.v1_angles = np.linspace(-np.pi/2 + np.pi/(2 * self.v1_orientation_number), np.pi/2 - np.pi/(2 * self.v1_orientation_number), self.v1_orientation_number)
         # Create range of phases between 0 and pi for each V1 gabor
-        self.phis_sfs_range = np.linspace(0, np.pi, self.phis_sfs) 
+        self.phis_range = np.linspace(0, np.pi, self.phis) 
+        self.sfs_range = [5, 9]
         weights = []
 
          # For each orientation and phase, create gabor filter with those parameters
-        for i in range(self.v1_orientation_number):
-            for j in range(self.phis_sfs):
-                theta = self.v1_angles[i]
-                phi = self.phis_sfs_range[j]
-                kernel = self.generate_gabor(self.v1_size, theta, phi, 5, gamma = self.v1_gamma)
-                kernel = kernel * self.v1_rescale
+        for theta in self.v1_angles:
+            for sf in self.sfs_range:
+                for phi in self.phis_range:
+                    kernel = self.generate_gabor(self.v1_size, theta, phi, sf, gamma = self.v1_gamma)
+                    kernel = kernel * self.v1_rescale
 
                     # Add random noise from normal distribution 
 #                 noise = torch.normal(0, 0.03, (self.v1_size, self.v1_size)) 
 #                 kernel = kernel + noise 
-                weights.append(kernel)
+                    weights.append(kernel)
 
         # Return torch tensor weights for each V1 gabor filter
         weight = torch.stack(weights).view(
-           self.v1_orientation_number * self.phis_sfs, 1, self.v1_size, self.v1_size) 
+           self.v1_orientation_number * self.sfs * self.phis, 1, self.v1_size, self.v1_size) 
         return weight 
         
     def init_gaussian_weights(self):
@@ -262,21 +262,35 @@ class convnet(nn.Module):
         
         # V1 simple cell convolution
         out = self.simple_weight(x)
-        out.view(1, self.v1_orientation_number * self.phis_sfs, self.v1_dimensions, self.v1_dimensions)
-    
-        # V1 complex cell pooling over phase/sf
-        pools = torch.zeros(1, 1, self.v1_orientation_number, self.v1_dimensions, self.v1_dimensions)
+        out.view(1, self.v1_orientation_number * self.sfs * self.phis, self.v1_dimensions, self.v1_dimensions)
+        out = F.relu(out)
         
-        for i in range(0, self.v1_orientation_number*self.phis_sfs, self.phis_sfs):
-            # Apply relu activation function on all activation maps with same orientation but different phase/sfs 
-            relu = F.relu(out[0][i:i+self.phis_sfs]) 
+        # V1 complex cell pooling over phase
+        phase_pools = []
+        
+        for i in range(0, self.v1_orientation_number*self.sfs*self.phis, self.phis):
+            # Pick all activation maps with same orientation but different phase and square them
+            pool = out[0][i:i+self.phis] ** 2
             
-            # Sum all of these activation maps after relu 
-            pool = (torch.sum(relu, dim = 0) * self.phase_rescale / self.phis_sfs).view(1, self.v1_dimensions, self.v1_dimensions)
-            pools[0][0][i//4] = pool
+            # Sum all of these activation maps
+            pool = (torch.sqrt(torch.sum(pool, dim = 0)) * self.phase_rescale / self.phis).view(1, self.v1_dimensions, self.v1_dimensions)
+            phase_pools.append(pool)
+        out = torch.stack(phase_pools).view(self.v1_orientation_number * self.sfs, self.v1_dimensions, self.v1_dimensions)
+       
         
+        # Pooling over sf
+        sf_pools = torch.zeros(1, 1, self.v1_orientation_number, self.v1_dimensions, self.v1_dimensions)
+        
+        for i in range(0, self.v1_orientation_number * self.sfs, self.sfs):
+            # Pick all activation maps with same orientation but different sfs
+            pool = out[i:i+self.sfs] 
+            
+            # Mean sum all of these activation maps  
+            pool = (torch.sum(pool, dim = 0) / self.sfs).view(1, self.v1_dimensions, self.v1_dimensions) 
+            sf_pools[0][0][i // self.sfs] = pool
+            
         # V4 cell convolution
-        out = self.v4_weight(pools).view(1, self.v4_orientation_number * self.v4_dimensions * self.v4_dimensions)
+        out = self.v4_weight(sf_pools).view(1, self.v4_orientation_number * self.v4_dimensions * self.v4_dimensions)
         
 
         
@@ -360,12 +374,12 @@ class convnet(nn.Module):
             self.generalize_perform.append(self.generalization_score)
             self.generalize_error.append(self.general_mean_error)
 
-            if i % 500 == 0 or i == iterations - 1:
-                self.v1_tuning_curve()
-                self.v4_tuning_curve()
-                self.otc_curve(v1_position_1 = 11, v1_position_2 = 11, v4_position_1 = 1, v4_position_2 = 1)
-                self.v1_otc_max_diffs.append(self.v1_max_diff)
-                self.v4_otc_max_diffs.append(self.v4_max_diff)
+#             if i % 500 == 0 or i == iterations - 1:
+#                 self.v1_tuning_curve()
+#                 self.v4_tuning_curve()
+#                 self.otc_curve(v1_position_1 = 11, v1_position_2 = 11, v4_position_1 = 1, v4_position_2 = 1)
+#                 self.v1_otc_max_diffs.append(self.v1_max_diff)
+#                 self.v4_otc_max_diffs.append(self.v4_max_diff)
                     
 
 #         Generate tuning curves    
@@ -518,7 +532,7 @@ class convnet(nn.Module):
         net_diff = []
         
         # Calculate frobenius norm of each gabor difference and return mean magnitude of change
-        for i in diff.view(self.v1_orientation_number*self.phis_sfs, self.v1_size, self.v1_size):
+        for i in diff.view(self.v1_orientation_number*self.sfs*self.phis, self.v1_size, self.v1_size):
             net_diff.append(torch.linalg.norm(i, ord = 'fro').item())
         return np.mean(net_diff)
     
@@ -582,97 +596,140 @@ class convnet(nn.Module):
         
         # Create list of angles between -pi/2 and pi/2 to generate tuning curves
         self.tuning_curve_sample = 100
-        x = np.linspace(-np.pi/2, np.pi/2, self.tuning_curve_sample)
         
         # Initialise tensor for all tuning curves after training, organized into orientations, phase/sfs, tuning curve data
-        self.results = torch.empty(self.v1_orientation_number, self.phis_sfs, len(x))
+        self.results = torch.empty(self.v1_orientation_number, self.sfs, self.phis, self.tuning_curve_sample)
         
         # Initialise tensor for all tuning curves before training
-        self.initial_tuning_curves = torch.empty(self.v1_orientation_number, self.phis_sfs, len(x))
+        self.initial_tuning_curves = torch.empty(self.v1_orientation_number, self.sfs, self.phis, self.tuning_curve_sample)
         
         # Create gabor at each orientation and store measured activity of each V1 gabor filter in tensor
         with torch.no_grad():
-            for i in tqdm(range(len(x))):
+            for i in tqdm(range(self.tuning_curve_sample)):
                 for orientation in range(self.v1_orientation_number):
-                    for phi in range(self.phis_sfs):
+                    for sf in range(self.sfs):
+                        for phi in range(self.phis):
+                            
+                            if phi == 0 or phi == self.phis - 1:
+                                x = np.linspace(-np.pi/2, np.pi/2, self.tuning_curve_sample)
+                            else:
+                                x = np.linspace(-np.pi/2, 3*np.pi/2, self.tuning_curve_sample)
+                            
+                            # Create gabor
+                            test = self.generate_gabor(self.v1_size, x[i], self.phis_range[phi], 5).view(
+                                self.v1_size, self.v1_size)#.to(self.device)
 
-                        # Create gabor
-                        test = self.generate_gabor(self.v1_size, x[i], self.phis_sfs_range[phi], 5).view(
-                            self.v1_size, self.v1_size)#.to(self.device)
+                            # Present to specific gabor after training
+                            result = torch.sum(
+                                self.simple_weight.weight[self.phis * self.sfs * orientation + self.phis * sf + phi][0].view(
+                                    self.v1_size, self.v1_size) * test)
+                            result = F.relu(result)
 
-                        # Present to specific gabor after training
-                        result = torch.sum(
-                            self.simple_weight.weight[self.phis_sfs * orientation + phi][0].view(
-                                self.v1_size, self.v1_size) * test)
+                            # Present to specific gabor before training
+                            initial_result = torch.sum(
+                                self.before_v1weight[self.phis * self.sfs * orientation + self.phis * sf + phi][0].view(
+                                    self.v1_size, self.v1_size) * test)
+                            initial_result = F.relu(initial_result)
 
-                        # Present to specific gabor before training
-                        initial_result = torch.sum(
-                            self.before_v1weight[self.phis_sfs * orientation + phi][0].view(
-                                self.v1_size, self.v1_size) * test)
-
-                        # Save activity in tensor
-                        self.results[orientation][phi][i] = result 
-                        self.initial_tuning_curves[orientation][phi][i] = initial_result 
+                            # Save activity in tensor
+                            self.results[orientation][sf][phi][i] = result 
+                            self.initial_tuning_curves[orientation][sf][phi][i] = initial_result 
                                 
             # Normalize tuning curves
             self.results = self.results / self.initial_tuning_curves.max()
             self.initial_tuning_curves = self.initial_tuning_curves / self.initial_tuning_curves.max()
                                 
 
-    def plot_v1_tuning_curve(self, orientation, phi_sf, orientations = False, phi_sfs = False, differences = False):
+    def plot_v1_tuning_curve(self, orientation, sf, phi, orientations = False, sfs = False, phis = False, differences = False, color = False):
         
         """
-        Plot tuning curves at a particular orientation index or phase/spatial frequeny index. Setting orientations = True plots 
-        tuning curves at all orientations at a specified phase/spatial frequency. Setting phi_sfs = True plots tuning curves at 
-        all phases/spatial frequencies (determined during network initialization) at a specified orientation. Setting differences 
-        = True plots difference in responses using initial V1 simple cell weights and trained weights. 
+        Plot tuning curves at a particular orientation index or phase/spatial frequeny index and at a particular 
+        filter position. Setting orientations = True plots tuning curves at all orientations at a specified phase and
+        sf. Setting sf = True plots tuning curves at all sfs at a specified orientation and phase. Setting phi = True plots 
+        tuning curves at all phases at a specified orientation and sf. Setting differences = True plots difference in
+        responses using initial V1 simple cell weights and trained weights. Setting color = True plots the curves in a gradient 
+        of colors.
         """
         
         # Ensure orientation is between 0 and v1_orientation_number
         if not 0 <= orientation <= self.v1_orientation_number - 1:
-            return("orientation needs to be between 0 and " + str(self.v1_orientation_number - 1))
+            return("position needs to be between 0 and " + str(self.v1_orientation_number - 1))
         
-        # Ensure phi is between 0 and phis_sfs
-        if not 0 <= phi_sf <= self.v1_dimensions - 1:
-            return("phi/sf needs to be between 0 and " + str(self.phis_sfs - 1))
+        # Ensure phi is between 0 and phis
+        if not 0 <= phi <= self.phis - 1:
+            return("position needs to be between 0 and " + str(self.phis - 1))
+        
+        # Ensure sf is between 0 and phisfss
+        if not 0 <= sf <= self.sfs - 1:
+            return("position needs to be between 0 and " + str(self.sfs - 1))
         
         # Create list of angles between -pi/2 and pi/2
-        x = np.linspace(-np.pi/2, np.pi/2, self.tuning_curve_sample)
-        x = (x * 180) / np.pi
+        if phi == 0 or phi == self.phis - 1:
+            x = np.linspace(-np.pi/2, np.pi/2, self.tuning_curve_sample)
+            x = (x * 180) / np.pi
+        else:
+            x = np.linspace(-np.pi/2, 3*np.pi/2, self.tuning_curve_sample)
+            x = (x * 180) / np.pi
+        
+        colors = pl.cm.jet(np.linspace(0, 1, self.v1_orientation_number))
+        
+        # Calculate difference in tuning curves before and after training
+        difference = self.results - self.initial_tuning_curves
         
         if orientations == True and differences == False:
-            
-            # Plot each tuning curve at different orientations with specified phase/sf 
+                
+            # Plot each tuning curve at different orientations with specified phase/sf and position
             for i in range(self.v1_orientation_number):
-                plt.plot(x, self.results[i, phi_sf, :])
-            
+                if color == True:
+                    plt.plot(x, self.results[i, sf, phi, :], color = colors[i])
+                else:
+                    plt.plot(x, self.results[i, sf, phi, :])
+                
             # Create legend
             plt.legend([round(self.v1_angles[i] * 180 / np.pi, 1) for i in range(self.v1_orientation_number)])
             
             plt.ylabel("Response")
             plt.title("V1 tuning curves selective for different orientations", loc = 'center')
+            
+        if sfs == True and differences == False:
+            
+            # Plot each tuning curve at different phase/sfs with specified orientation and position
+            for i in range(self.sfs):
+                if color == True:
+                    plt.plot(x, self.results[orientation, i, phi, :], color = colors[i])
+                else:
+                    plt.plot(x, self.results[orientation, i, phi, :])
                 
-        if phi_sfs == True and differences == False:
-            
-            # Plot each tuning curve at different phase/sfs with specified orientation 
-            for i in range(self.phis_sfs):
-                plt.plot(x, self.results[orientation, i, :])
-            
             # Create legend
-            ranges = np.linspace(self.phis_sfs_range[0], self.phis_sfs_range[-1], self.phis_sfs)
-            plt.legend([round(ranges[i], 1) for i in range(self.phis_sfs)])
+            plt.legend([5, 9])
+            
+            plt.ylabel("Response")
+            plt.title("V1 tuning curves selective for different SFs", loc = 'center');
+        
+        if phis == True and differences == False:
+            
+            # Plot each tuning curve at different phase/sfs with specified orientation and position
+            for i in range(self.phis):
+                if color == True:
+                    plt.plot(x, self.results[orientation, sf, i, :], color = colors[i])
+                else:
+                    plt.plot(x, self.results[orientation, sf, i, :])
+                
+            # Create legend
+            ranges = np.linspace(self.phis_range[0], self.phis_range[-1], self.phis)
+            plt.legend([round(ranges[i], 1) for i in range(self.phis)])
             
             plt.ylabel("Response")
             plt.title("V1 tuning curves selective for different phase/SFs", loc = 'center');
             
         if orientations == True and differences == True:
             
-            # Calculate difference in tuning curves before and after training
-            difference = self.results - self.initial_tuning_curves
-            
-            # Plot each difference in tuning curve at different orientations with specified phase/sf 
+            # Plot each difference in tuning curve at different orientations with specified phase/sf and position
             for i in range(self.v1_orientation_number):
-                plt.plot(x, difference[i, phi_sf, :])
+                if color == True:
+                    plt.plot(x, difference[i, sf, phi, :], color = colors[i])
+                else:
+                    plt.plot(x, difference[i, sf, phi, :])
             
             # Create legend
             plt.legend([round(self.v1_angles[i] * 180 / np.pi, 1) for i in range(self.v1_orientation_number)])
@@ -680,22 +737,37 @@ class convnet(nn.Module):
             plt.ylabel("Difference in response")
             plt.title("Difference in V1 tuning curves selective for different orientations", loc = 'center');
             
-        
-        if phi_sfs == True and differences == True:
             
-            # Calculate difference in tuning curves before and after training
-            difference = self.results - self.initial_tuning_curves
+        if sfs == True and differences == True:
             
-            # Plot each difference in tuning curve at different phase/sfs with specified orientation 
-            for i in range(self.phis_sfs):
-                plt.plot(x, difference[orientation, i, :])
-
+            # Plot each tuning curve at different phase/sfs with specified orientation and position
+            for i in range(self.sfs):
+                if color == True:
+                    plt.plot(x, difference[orientation, i, phi, :], color = colors[i])
+                else:
+                    plt.plot(x, difference[orientation, i, phi, :])
+                
             # Create legend
-            ranges = np.linspace(self.phis_sfs_range[0], self.phis_sfs_range[-1], self.phis_sfs)
-            plt.legend([round(ranges[i], 1) for i in range(self.phis_sfs)])
+            plt.legend([5, 9])
             
             plt.ylabel("Difference in response")
-            plt.title("Difference in V1 tuning curves selective for different phase/SFs", loc = 'center');
+            plt.title("Difference in V1 tuning curves selective for different SFs", loc = 'center');    
+        
+        if phis == True and differences == True:
+            
+            # Plot each difference in tuning curve at different phase/sfs with specified orientation and position
+            for i in range(self.phis):
+                if color == True:
+                    plt.plot(x, difference[orientation, sf, i, :], color = colors[i])
+                else:
+                    plt.plot(x, difference[orientation, sf, i, :])
+
+            # Create legend
+            ranges = np.linspace(self.phis_range[0], self.phis_range[-1], self.phis)
+            plt.legend([round(ranges[i], 1) for i in range(self.phis)])
+            
+            plt.ylabel("Difference in response")
+            plt.title("Difference in V1 tuning curves selective for different phases", loc = 'center');
         
         plt.xlabel("Angle (Degrees)")
         
@@ -725,21 +797,38 @@ class convnet(nn.Module):
                 
                 
                 # Forward pass through V1 
-                out_after = self.simple_weight(test).view(1, self.v1_orientation_number * self.phis_sfs, self.v1_dimensions, self.v1_dimensions)
+                out_after = self.simple_weight(test).view(1, self.v1_orientation_number * self.sfs * self.phis, self.v1_dimensions, self.v1_dimensions)
+                out_after = F.relu(out_after)
                 
-                out_before = self.simple_weight_before(test).view(1, self.v1_orientation_number * self.phis_sfs, self.v1_dimensions, self.v1_dimensions)
+                out_before = self.simple_weight_before(test).view(1, self.v1_orientation_number * self.sfs * self.phis, self.v1_dimensions, self.v1_dimensions)
+                out_before = F.relu(out_before)
                 
-                pools_after = torch.zeros(self.v1_orientation_number, self.v1_dimensions, self.v1_dimensions)
-                pools_before = torch.zeros(self.v1_orientation_number, self.v1_dimensions, self.v1_dimensions)
+                phase_pools_after = []
+                phase_pools_before = []
                 
-                for j in range(0, self.v1_orientation_number*self.phis_sfs, self.phis_sfs):
-                    relu_after = F.relu(out_after[0][j:j+self.phis_sfs]) 
-                    pool_after = (torch.sum(relu_after, dim = 0) * self.phase_rescale / self.phis_sfs).view(1, self.v1_dimensions, self.v1_dimensions) 
-                    pools_after[j//4] = pool_after
+                for j in range(0, self.v1_orientation_number*self.sfs*self.phis, self.phis):
+                    pool = out_after[0][j:j+self.phis] ** 2
+                    pool = (torch.sqrt(torch.sum(pool, dim = 0)) * self.phase_rescale/self.phis).view(1, self.v1_dimensions, self.v1_dimensions)
+                    phase_pools_after.append(pool)
                     
-                    relu_before = F.relu(out_before[0][j:j+self.phis_sfs]) 
-                    pool_before = (torch.sum(relu_before, dim = 0) * self.phase_rescale / self.phis_sfs).view(1, self.v1_dimensions, self.v1_dimensions) 
-                    pools_before[j//4] = pool_before
+                    pool = out_before[0][j:j+self.phis] ** 2
+                    pool = (torch.sqrt(torch.sum(pool, dim = 0)) * self.phase_rescale/self.phis).view(1, self.v1_dimensions, self.v1_dimensions)
+                    phase_pools_before.append(pool)
+                    
+                phase_pools_after = torch.stack(phase_pools_after).view(self.v1_orientation_number * self.sfs, self.v1_dimensions, self.v1_dimensions)
+                phase_pools_before = torch.stack(phase_pools_before).view(self.v1_orientation_number * self.sfs, self.v1_dimensions, self.v1_dimensions)
+                
+                sf_pools_after = torch.zeros(self.v1_orientation_number, self.v1_dimensions, self.v1_dimensions)
+                sf_pools_before = torch.zeros(self.v1_orientation_number, self.v1_dimensions, self.v1_dimensions)
+                
+                for k in range(0, self.v1_orientation_number * self.sfs, self.sfs):
+                    pool = phase_pools_after[k:k+self.sfs]
+                    pool = (torch.sum(pool, dim = 0) / self.sfs).view(1, self.v1_dimensions, self.v1_dimensions)
+                    sf_pools_after[k // self.sfs] = pool
+                    
+                    pool = phase_pools_before[k:k+self.sfs]
+                    pool = (torch.sum(pool, dim = 0) / self.sfs).view(1, self.v1_dimensions, self.v1_dimensions)
+                    sf_pools_before[k // self.sfs] = pool
                 
                 # For each V4 orientation, present the centre gabor test input to the V4 weight and measure activity
                 v4_pool_after = torch.zeros(self.v4_orientation_number)
@@ -748,11 +837,11 @@ class convnet(nn.Module):
                 index1 = int((self.v1_dimensions - 1)/ 2 - (self.v4_size - 1)/ 2)
                 index2 = int((self.v1_dimensions - 1)/ 2 + (self.v4_size - 1)/ 2 + 1)
                 for k in range(self.v4_orientation_number):
-                    out_after = (pools_after[:, index1:index2, index1:index2] * self.v4_weight.weight[k, 0, :, :, :]).sum([-1, 0, 1])
+                    out_after = (sf_pools_after[:, index1:index2, index1:index2] * self.v4_weight.weight[k, 0, :, :, :]).sum([-1, 0, 1])
                     v4_pool_after[k] = out_after
 
                     out_before = (
-                        pools_before[:, index1:index2, index1:index2] * self.before_v4weight[k, 0, :, :, :]).sum([-1, 0, 1])
+                        sf_pools_before[:, index1:index2, index1:index2] * self.before_v4weight[k, 0, :, :, :]).sum([-1, 0, 1])
                     v4_pool_before[k] = out_before
 
 
@@ -819,87 +908,109 @@ class convnet(nn.Module):
         self.before_bandwidths = []
         
         self.xs = [i for i in range(self.tuning_curve_sample)]
+        
+        angles = np.linspace(-np.pi/2 + np.pi/(2 * self.v1_orientation_number), np.pi/2 - np.pi/(2 * self.v1_orientation_number), self.v1_orientation_number)
+        threshold1 = self.angle1 - np.pi/8
+        threshold2 = self.angle2 + np.pi/8
+        
         for i in range(self.v1_orientation_number):
-            for j in range(self.phis_sfs):
-                
-                # Calculate tuning curve parameters after training
-                
-                # Set tuning curve at particular orientation, and phase/sf after training
-                curve = self.results[i, j, :]
-
-                # Measure amplitude using max and min of tuning curve
-                amplitude = curve.max() - curve.min()
-                self.after_amplitudes.append(amplitude)
-                
-                # Find amplitude of half the difference between max and min
-                halfmax_amplitude = torch.abs(curve.max()) - torch.abs(curve.min())
-                halfmax = halfmax_amplitude/2 + curve.min()
-                
-                # Find the first index closest to halfmax
-                halfmax_index1 = self.find_nearest(curve, halfmax)
-                
-                # Remove that point to find the next closest index, ensuring that it is on the other side of the curve
-                temporary = torch.cat([curve[0:halfmax_index1], curve[halfmax_index1+1:]])
-                halfmax_index2 = self.find_nearest(temporary, halfmax)
-                
-                # While loop to prevent choosing 2 halfmax indices next to each other (check -20 and -5 to prevent edge cases)
-                add = 0
-                while self.xs[halfmax_index1 - 22] <= self.xs[halfmax_index2 - 20] <= self.xs[halfmax_index1 - 18] or self.xs[halfmax_index1 - 7] <= self.xs[halfmax_index2 - 5] <= self.xs[halfmax_index1 - 3]:
-                    temporary = torch.cat([temporary[0:halfmax_index2], temporary[halfmax_index2+1:]])
-                    halfmax_index2 = self.find_nearest(temporary, halfmax)
-                    add += 1
-
-                # Add the indices taken away back in if needed to get 2 correct indices at halfmax
-                if halfmax_index1 < halfmax_index2:
-                    halfmax_index2 = halfmax_index2 + 1 + add
-                # Find closest difference between the two points at halfmax to calculate bandwidth 
-                if curve[self.xs[halfmax_index1 - 1]] < curve[self.xs[halfmax_index1]] < curve[self.xs[(halfmax_index1 + 1) % self.tuning_curve_sample]] and curve[self.xs[halfmax_index2 - 1]] > curve[self.xs[halfmax_index2]] > curve[self.xs[(halfmax_index2 + 1) % self.tuning_curve_sample]] and halfmax_index1<halfmax_index2:
-                    bandwidth = x[halfmax_index2] - x[halfmax_index1]
-                elif curve[self.xs[halfmax_index2 - 1]] < curve[self.xs[halfmax_index2]] < curve[self.xs[(halfmax_index2 + 1) % self.tuning_curve_sample]] and curve[self.xs[halfmax_index1 - 1]] > curve[self.xs[halfmax_index1]] > curve[self.xs[(halfmax_index1 + 1) % self.tuning_curve_sample]] and halfmax_index2 < halfmax_index1:
-                    bandwidth = x[halfmax_index1] - x[halfmax_index2]
-                else:
-                    bandwidth = 180 - np.abs(x[halfmax_index1] - x[halfmax_index2])
-                self.before_bandwidths.append(bandwidth/2)
-                
-                # Calculate tuning curve parameters before training
-                
-                # Set tuning curve at particular orientation, and phase/sf before training
-                initial_params = self.initial_tuning_curves[i, j, :]
-                
-                # Measure amplitude using max and min of tuning curve
-                amplitude2 = initial_params.max() - initial_params.min()
-                self.before_amplitudes.append(amplitude2)
             
-                # Find amplitude of half the difference between max and min
-                halfmax2_amplitude2 = torch.abs(initial_params.max()) - torch.abs(initial_params.min())
-                halfmax2 = halfmax2_amplitude2/2 + initial_params.min()
+            # Only calculate parameters between trained angle ± 22.5°
+            if not threshold1 <= angles[i] <= threshold2:
+                continue
                 
-                # Find the first index closest to halfmax
-                halfmax2_index1 = self.find_nearest(initial_params, halfmax2)
-                
-                # Remove that point to find the next closest index, ensuring that it is on the other side of the curve
-                temporary2 = torch.cat([initial_params[0:halfmax2_index1], initial_params[halfmax2_index1+1:]])
-                halfmax2_index2 = self.find_nearest(temporary2, halfmax2)
-                
-                # While loop to prevent choosing 2 halfmax indices next to each other (check -20 and -5 to prevent edge cases) 
-                add = 0
-                while self.xs[halfmax2_index1 - 22] <= self.xs[halfmax2_index2 - 20] <= self.xs[halfmax2_index1 - 18] or self.xs[halfmax2_index1 - 7] <= self.xs[halfmax2_index2 - 5] <= self.xs[halfmax2_index1 - 3]:
-                    temporary2 = torch.cat([temporary2[0:halfmax2_index2], temporary2[halfmax2_index2+1:]])
+            for sf in range(self.sfs):
+                for j in range(self.phis):
+
+                    # Calculate tuning curve parameters after training
+
+                    # Set tuning curve at particular orientation, and phase/sf after training
+                    curve = self.results[i, j, :]
+
+                    # Create list of angles between -pi/2 and pi/2 for units tuned to first and last phases, and between -pi/2 and 3pi/2 for second and third phases
+
+                    if j == 0 or j == self.phis - 1:
+                        a = -np.pi/2
+                        b = np.pi/2
+                    else:
+                        a = -np.pi/2
+                        b = 3*np.pi/2
+                    x = np.linspace(a, b, self.tuning_curve_sample)
+                    x = (x * 180) / np.pi
+                    
+                    # Measure amplitude using max and min of tuning curve
+                    amplitude = curve.max() - curve.min()
+                    self.after_amplitudes.append(amplitude)
+
+                    # Find amplitude of half the difference between max and min
+                    halfmax_amplitude = torch.abs(curve.max()) - torch.abs(curve.min())
+                    halfmax = halfmax_amplitude/2 + curve.min()
+
+                    # Find the first index closest to halfmax
+                    halfmax_index1 = self.find_nearest(curve, halfmax)
+
+                    # Remove that point to find the next closest index, ensuring that it is on the other side of the curve
+                    temporary = torch.cat([curve[0:halfmax_index1], curve[halfmax_index1+1:]])
+                    halfmax_index2 = self.find_nearest(temporary, halfmax)
+
+                    # While loop to prevent choosing 2 halfmax indices next to each other (check -20 and -5 to prevent edge cases)
+                    add = 0
+                    while self.xs[halfmax_index1 - 22] <= self.xs[halfmax_index2 - 20] <= self.xs[halfmax_index1 - 18] or self.xs[halfmax_index1 - 7] <= self.xs[halfmax_index2 - 5] <= self.xs[halfmax_index1 - 3]:
+                        temporary = torch.cat([temporary[0:halfmax_index2], temporary[halfmax_index2+1:]])
+                        halfmax_index2 = self.find_nearest(temporary, halfmax)
+                        add += 1
+
+                    # Add the indices taken away back in if needed to get 2 correct indices at halfmax
+                    if halfmax_index1 < halfmax_index2:
+                        halfmax_index2 = halfmax_index2 + 1 + add
+                    # Find closest difference between the two points at halfmax to calculate bandwidth 
+                    if curve[self.xs[halfmax_index1 - 1]] < curve[self.xs[halfmax_index1]] < curve[self.xs[(halfmax_index1 + 1) % self.tuning_curve_sample]] and curve[self.xs[halfmax_index2 - 1]] > curve[self.xs[halfmax_index2]] > curve[self.xs[(halfmax_index2 + 1) % self.tuning_curve_sample]] and halfmax_index1<halfmax_index2:
+                        bandwidth = x[halfmax_index2] - x[halfmax_index1]
+                    elif curve[self.xs[halfmax_index2 - 1]] < curve[self.xs[halfmax_index2]] < curve[self.xs[(halfmax_index2 + 1) % self.tuning_curve_sample]] and curve[self.xs[halfmax_index1 - 1]] > curve[self.xs[halfmax_index1]] > curve[self.xs[(halfmax_index1 + 1) % self.tuning_curve_sample]] and halfmax_index2 < halfmax_index1:
+                        bandwidth = x[halfmax_index1] - x[halfmax_index2]
+                    else:
+                        bandwidth = 180 - np.abs(x[halfmax_index1] - x[halfmax_index2])
+                    self.after_bandwidths.append(bandwidth/2)
+
+                    # Calculate tuning curve parameters before training
+
+                    # Set tuning curve at particular orientation, and phase/sf before training
+                    initial_params = self.initial_tuning_curves[i, j, :]
+
+                    # Measure amplitude using max and min of tuning curve
+                    amplitude2 = initial_params.max() - initial_params.min()
+                    self.before_amplitudes.append(amplitude2)
+
+                    # Find amplitude of half the difference between max and min
+                    halfmax2_amplitude2 = torch.abs(initial_params.max()) - torch.abs(initial_params.min())
+                    halfmax2 = halfmax2_amplitude2/2 + initial_params.min()
+
+                    # Find the first index closest to halfmax
+                    halfmax2_index1 = self.find_nearest(initial_params, halfmax2)
+
+                    # Remove that point to find the next closest index, ensuring that it is on the other side of the curve
+                    temporary2 = torch.cat([initial_params[0:halfmax2_index1], initial_params[halfmax2_index1+1:]])
                     halfmax2_index2 = self.find_nearest(temporary2, halfmax2)
-                    add += 1
-                
-                # Add the indices taken away back in if needed to get 2 correct indices at halfmax
-                if halfmax2_index1 < halfmax2_index2:
-                    halfmax2_index2 = halfmax2_index2 + 1 + add
-                
-                # Find closest difference between the two points at halfmax to calculate bandwidth
-                if curve[self.xs[halfmax2_index1 - 1]] < curve[self.xs[halfmax2_index1]] < curve[self.xs[(halfmax2_index1 + 1) % self.tuning_curve_sample]] and curve[self.xs[halfmax2_index2 - 1]] > curve[self.xs[halfmax2_index2]] > curve[self.xs[(halfmax2_index2 + 1) % self.tuning_curve_sample]] and halfmax2_index1<halfmax2_index2:
-                    bandwidth2 = x[halfmax2_index2] - x[halfmax2_index1]
-                elif curve[self.xs[halfmax2_index2 - 1]] < curve[self.xs[halfmax2_index2]] < curve[self.xs[(halfmax2_index2 + 1) % self.tuning_curve_sample]] and curve[self.xs[halfmax2_index1 - 1]] > curve[self.xs[halfmax2_index1]] > curve[self.xs[(halfmax2_index1 + 1) % self.tuning_curve_sample]] and halfmax2_index2 < halfmax2_index1:
-                    bandwidth2 = x[halfmax2_index1] - x[halfmax2_index2]
-                else:
-                    bandwidth2 = 180 - np.abs(x[halfmax2_index1] - x[halfmax2_index2])
-                self.after_bandwidths.append(bandwidth2/2)
+
+                    # While loop to prevent choosing 2 halfmax indices next to each other (check -20 and -5 to prevent edge cases) 
+                    add = 0
+                    while self.xs[halfmax2_index1 - 22] <= self.xs[halfmax2_index2 - 20] <= self.xs[halfmax2_index1 - 18] or self.xs[halfmax2_index1 - 7] <= self.xs[halfmax2_index2 - 5] <= self.xs[halfmax2_index1 - 3]:
+                        temporary2 = torch.cat([temporary2[0:halfmax2_index2], temporary2[halfmax2_index2+1:]])
+                        halfmax2_index2 = self.find_nearest(temporary2, halfmax2)
+                        add += 1
+
+                    # Add the indices taken away back in if needed to get 2 correct indices at halfmax
+                    if halfmax2_index1 < halfmax2_index2:
+                        halfmax2_index2 = halfmax2_index2 + 1 + add
+
+                    # Find closest difference between the two points at halfmax to calculate bandwidth
+                    if curve[self.xs[halfmax2_index1 - 1]] < curve[self.xs[halfmax2_index1]] < curve[self.xs[(halfmax2_index1 + 1) % self.tuning_curve_sample]] and curve[self.xs[halfmax2_index2 - 1]] > curve[self.xs[halfmax2_index2]] > curve[self.xs[(halfmax2_index2 + 1) % self.tuning_curve_sample]] and halfmax2_index1<halfmax2_index2:
+                        bandwidth2 = x[halfmax2_index2] - x[halfmax2_index1]
+                    elif curve[self.xs[halfmax2_index2 - 1]] < curve[self.xs[halfmax2_index2]] < curve[self.xs[(halfmax2_index2 + 1) % self.tuning_curve_sample]] and curve[self.xs[halfmax2_index1 - 1]] > curve[self.xs[halfmax2_index1]] > curve[self.xs[(halfmax2_index1 + 1) % self.tuning_curve_sample]] and halfmax2_index2 < halfmax2_index1:
+                        bandwidth2 = x[halfmax2_index1] - x[halfmax2_index2]
+                    else:
+                        bandwidth2 = 180 - np.abs(x[halfmax2_index1] - x[halfmax2_index2])
+                    self.before_bandwidths.append(bandwidth2/2)
           
         # Calculate mean and standard deviation of the ampltiude and bandwidth of each v1 curves before and after training
         self.v1_mean_after_amplitude = np.mean(self.after_amplitudes)
@@ -934,9 +1045,17 @@ class convnet(nn.Module):
         self.before_amplitudes = []
         self.before_bandwidths = []
         
+        angles = np.linspace(-np.pi/2 + np.pi/(2 * self.v4_orientation_number), np.pi/2 - np.pi/(2 * self.v4_orientation_number), self.v4_orientation_number)
+        threshold1 = self.angle1 - np.pi/4
+        threshold2 = self.angle2 + np.pi/4
+        
         self.xs = [i for i in range(self.tuning_curve_sample)]
         for i in range(self.v4_orientation_number):
 
+            # Only calculate parameters between trained angle ± 45°
+            if not threshold1 <= angles[i] <= threshold2:
+                continue
+            
             # Calculate tuning curve parameters after training
                 
             # Set tuning curve at particular orientation after training
@@ -1064,59 +1183,63 @@ class convnet(nn.Module):
             trained_index1 = self.find_nearest(torch.tensor(x), trained_angle1)
             trained_index2 = self.find_nearest(torch.tensor(x), trained_angle2)
 
-            for j in range(self.phis_sfs):
-                
-                # Set V1 tuning curve at particular orientation, and phase/sf after and before training
-                curve = self.results[i, j]
-                initial = self.initial_tuning_curves[i, j]
-                
-                # Find index of preferred orientation of curve
-                if torch.abs(curve.max()) > torch.abs(curve.min()):
-                    after_preferred_orientation = curve.argmax().item()
-                
-                if torch.abs(initial.max()) > torch.abs(initial.min()):
-                    before_preferred_orientation = initial.argmax().item()
-                
-                if torch.abs(curve.max()) < torch.abs(curve.min()):
-                    after_preferred_orientation = curve.argmin().item()
-                    
-                if torch.abs(initial.max()) < torch.abs(initial.min()):
-                    after_preferred_orientation = initial.argmin().item()
-                
-                # Save differences between preferred orientation and trained angle and save slope at trained angle – use negative trained angle if preferred orientation is negative and vice versa
-                
-                if x[after_preferred_orientation] <= 0:
-                    # Calculate difference between preferred orientation and trained angle
-                    after_ranges.append(x[after_preferred_orientation] - x[trained_index1])
-                    
-                    # Calculate slope at trained angle
-                    after_slope = (curve[trained_index1 + 1] - curve[trained_index1 - 1])/(2 * 180/self.tuning_curve_sample)
-                    
+            for sf in range(self.sfs):
+                for j in range(self.phis):
 
-                else:
-                    # Calculate difference between preferred orientation and trained angle
-                    after_ranges.append(x[after_preferred_orientation] - x[trained_index2])
+                    # Set V1 tuning curve at particular orientation, and phase/sf after and before training
+                    curve = self.results[i, sf, j]
+                    initial = self.initial_tuning_curves[i, sf, j]
+
+                    # Create list of angles depending on which phase the unit is selctive for
+                    if j == 0 or j == self.phis - 1:
+                        x = np.linspace(-np.pi/2, np.pi/2, self.tuning_curve_sample)
+                        x = x * 180 / np.pi
+                    else:
+                        x = np.linspace(-np.pi/2, 3*np.pi/2, self.tuning_curve_sample)
+                        x = x * 180 / np.pi
+     
+                    # Find index closest to trained angle
+                    trained_index1 = self.find_nearest(torch.tensor(x), trained_angle1)
+                    trained_index2 = self.find_nearest(torch.tensor(x), trained_angle2)
                     
-                    # Calculate slope at trained angle
-                    after_slope = (curve[trained_index2 + 1] - curve[trained_index2 - 1])/(2 * 180/self.tuning_curve_sample)
-                    
-                
-                if x[before_preferred_orientation] <= 0:    
-                    # Calculate difference between preferred orientation and trained angle
-                    before_ranges.append(x[before_preferred_orientation] - x[trained_index1])
-                    
-                    # Calculate slope at trained angle
-                    before_slope = (initial[trained_index1 + 1] - initial[trained_index1 - 1])/(2 * 180/self.tuning_curve_sample)
-                
-                else:
-                    # Calculate difference between preferred orientation and trained angle
-                    before_ranges.append(x[before_preferred_orientation] - x[trained_index2])
-                    
-                    # Calculate slope at trained angle
-                    before_slope = (initial[trained_index2 + 1] - initial[trained_index2 - 1])/(2 * 180/self.tuning_curve_sample)
-                    
-                after_slopes.append(torch.abs(after_slope).item())
-                before_slopes.append(torch.abs(before_slope).item())
+                    # Find index of preferred orientation of curve
+                    after_preferred_orientation = curve.argmax().item()   
+                    before_preferred_orientation = initial.argmax().item()
+
+                    # Save differences between preferred orientation and trained angle and save slope at trained angle – use negative trained angle if preferred orientation is negative and vice versa
+
+                    if x[after_preferred_orientation] <= 0:
+                        # Calculate difference between preferred orientation and trained angle
+                        after_ranges.append(x[after_preferred_orientation] - x[trained_index1])
+
+                        # Calculate slope at trained angle
+                        after_slope = (curve[trained_index1 + 1] - curve[trained_index1 - 1])/(2 * 180/self.tuning_curve_sample)
+
+
+                    else:
+                        # Calculate difference between preferred orientation and trained angle
+                        after_ranges.append(x[after_preferred_orientation] - x[trained_index2])
+
+                        # Calculate slope at trained angle
+                        after_slope = (curve[trained_index2 + 1] - curve[trained_index2 - 1])/(2 * 180/self.tuning_curve_sample)
+
+
+                    if x[before_preferred_orientation] <= 0:    
+                        # Calculate difference between preferred orientation and trained angle
+                        before_ranges.append(x[before_preferred_orientation] - x[trained_index1])
+
+                        # Calculate slope at trained angle
+                        before_slope = (initial[trained_index1 + 1] - initial[trained_index1 - 1])/(2 * 180/self.tuning_curve_sample)
+
+                    else:
+                        # Calculate difference between preferred orientation and trained angle
+                        before_ranges.append(x[before_preferred_orientation] - x[trained_index2])
+
+                        # Calculate slope at trained angle
+                        before_slope = (initial[trained_index2 + 1] - initial[trained_index2 - 1])/(2 * 180/self.tuning_curve_sample)
+
+                    after_slopes.append(torch.abs(after_slope).item())
+                    before_slopes.append(torch.abs(before_slope).item())
                 
             # Calculate mean difference between preferred orientation and trained angle of all tuning curves selective for particular orientation but different phase/sfs
             mean_after_range = np.mean(after_ranges)

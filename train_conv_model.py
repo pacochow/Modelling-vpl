@@ -15,12 +15,13 @@ from itertools import repeat
 
 logger = funcs.initLogger('train_log','train_log.log')
 
-network_name = "Ghose"
+# network_name = "Schoups model"
 
 # Task params
 precision_hard = np.pi/60
 precision_easy = np.pi/18
-scales = [0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10]
+# scales = [0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10]
+scales = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25]
 v1_weight_scales = scales * len(scales)
 phase_weight_scale = 0.01
 v4_weight_scales = [x for item in scales for x in repeat(item, len(scales))]
@@ -34,11 +35,9 @@ v1_orientation_number = 32
 v4_size = 11
 v4_stride = 6
 v4_orientation_number = 16
-phis_sfs = 4
+phis = 4
 training_size = 20
-phis = True
-sfs = False
-random_sf = True
+random_sf = False
 
 # v1_gammas = [i/10 for i in range(5, 16)] + [0.5] * 10
 # v4_orientation_stds = [0.7] * 11 + [i/10 for i in range(1, 11)]
@@ -50,8 +49,8 @@ v4_orientation_std = 0.7
 v1_weight_scale = v1_weight_scales[int(sys.argv[1]) - 1]
 v4_weight_scale = v4_weight_scales[int(sys.argv[1]) - 1]
 
-folder_savepath = 'trained_models/conv_low_randomized_normalized/weight_scale_' + str(v1_weight_scale).replace('.', '') + '_001_' + str(v4_weight_scale).replace('.', '') #path to existing directory for saving trained models
-savepath = folder_savepath + '/' + network_name + '_32_orientations_model_' 
+folder_savepath = 'trained_models/conv_high_fixed_normalized/weight_scale_' + str(v1_weight_scale).replace('.', '') + '_001_' + str(v4_weight_scale).replace('.', '') #path to existing directory for saving trained models
+savepath = folder_savepath + '/' 
 
 
 if not funcs.path_exists(folder_savepath):
@@ -62,7 +61,8 @@ logger.info('Model save path validated - saving to {}'.format(folder_savepath))
 
 paramdict= {'precision_hard' : precision_hard, 'precision_easy':precision_easy, 'v1_weight_scalar': v1_weight_scale, 'phase_weight_scalar': phase_weight_scale, 'v4_weight_scalar': v4_weight_scale, 'learning_rate':learning_rate, 'train_iters':iterations,
            'input_size':inp_size,'v1_size':v1_size,'v1_orientation_number':v1_orientation_number,'v4_size':v4_size,'v4_stride':v4_stride,
-            'v4_orientation_number':v4_orientation_number,'phis_sfs':phis_sfs,'training_size':training_size,'phis':phis,'sfs':sfs, 'random_sf':random_sf, 'v1_gamma': v1_gamma, 'v4_orientation_std': v4_orientation_std}
+            'v4_orientation_number':v4_orientation_number,'phis':phis,'training_size':training_size, 'random_sf':random_sf,
+            'v1_gamma': v1_gamma, 'v4_orientation_std': v4_orientation_std}
 np.save(folder_savepath + '/params',paramdict)
 
 #TRAIN NETWORK 
@@ -74,11 +74,11 @@ while done == False:
     net = Conv_model.convnet(
         input_size = inp_size, v1_size = v1_size, v1_orientation_number = v1_orientation_number,
         v4_size = v4_size, v4_stride = v4_stride, v4_orientation_number= v4_orientation_number,
-        phis_sfs = phis_sfs, training_size = training_size, phis = phis, sfs = sfs,
-        alpha = learning_rate, v1_rescale = v1_weight_scale, phase_rescale = phase_weight_scale, v4_rescale = v4_weight_scale,
-        v1_gamma = v1_gamma, v4_orientation_std = v4_orientation_std)
+        phis = phis, training_size = training_size, alpha = learning_rate, v1_rescale = v1_weight_scale, 
+        phase_rescale = phase_weight_scale, v4_rescale = v4_weight_scale, v1_gamma = v1_gamma, 
+        v4_orientation_std = v4_orientation_std)
 
-    net.transfer_inputting(-precision_easy, precision_easy, v1_size, v1_size, random_sf = random_sf)
+    net.transfer_inputting(-precision_hard, precision_hard, v1_size, v1_size, random_sf = random_sf)
     net.desired_outputting()
     optimizer = optim.SGD(net.parameters(), lr = net.alpha)
     logger.info('Network initialized')
@@ -108,11 +108,11 @@ torch.save(net.generalize_error,savepath + "generalization_error.pt")
 torch.save(net.trained_phis,savepath + "phases.pt")
 torch.save(net.trained_sfs,savepath + "sfs.pt")
 torch.save(net.v1_angles,savepath + "v1_angles.pt")
-torch.save(net.v1_otc_max_diffs,savepath + "v1_otc_max_diffs.pt")
-torch.save(net.v4_otc_max_diffs,savepath + "v4_otc_max_diffs.pt")
+# torch.save(net.v1_otc_max_diffs,savepath + "v1_otc_max_diffs.pt")
+# torch.save(net.v4_otc_max_diffs,savepath + "v4_otc_max_diffs.pt")
 
 
-net.otc_curve(v1_position_1 = 11, v1_position_2 = 11, v4_position_1 = 1, v4_position_2 = 1)
+net.otc_curve(v1_position_1 = int((net.v1_dimensions - 1) / 2), v1_position_2 = int((net.v1_dimensions - 1) / 2), v4_position_1 = int((net.v4_dimensions - 1) / 2), v4_position_2 = int((net.v4_dimensions - 1) / 2))
 net.v1_tuning_params()
 net.v4_tuning_params()
 
@@ -121,8 +121,10 @@ torch.save(net.v1_max_diff, savepath + "v1_max_diff.pt")
 torch.save(net.v4_max_diff, savepath + "v4_max_diff.pt")
 torch.save(net.v1_binary_heatmap,savepath + "v1_binary_heatmap.pt")
 torch.save(net.v4_binary_heatmap,savepath + "v4_binary_heatmap.pt")
-torch.save(net.v1_spatial_heatmap,savepath + "v1_spatial_heatmap.pt")
-torch.save(net.v4_spatial_heatmap,savepath + "v4_spatial_heatmap.pt")
+torch.save(net.v1_amplitude_difference, savepath + "v1_amplitude.pt")
+torch.save(net.v4_amplitude_difference, savepath + "v4_amplitude.pt")
+# torch.save(net.v1_spatial_heatmap,savepath + "v1_spatial_heatmap.pt")
+# torch.save(net.v4_spatial_heatmap,savepath + "v4_spatial_heatmap.pt")
 # torch.save(net.v1_max_diff_angle, savepath + "v1_max_diff_angle.pt")
 # torch.save(net.v4_max_diff_angle, savepath + "v4_max_diff_angle.pt")
 # torch.save(net.v1_mean_before_bandwidth, savepath + "v1_bandwidth.pt")
@@ -134,7 +136,7 @@ logger.info('Model saved to {}'.format(savepath))
 plt.figure(figsize = [35, 35])
 difference = False
 plt.subplot(3, 3, 1)
-net.plot_v1_tuning_curve(orientation = 3, phi_sf = 0, orientations = True, differences = difference);
+net.plot_v1_tuning_curve(orientation = 3, sf = 0, phi = 0, orientations = True, differences = difference);
 plt.axvline(net.angle1 * 180/np.pi, 0, 1, linestyle = 'dashed', color = 'black');
 plt.axvline(net.angle2 * 180/np.pi, 0, 1, linestyle = 'dashed', color = 'black');
 plt.title("V1 tuning curves after training")
@@ -148,7 +150,6 @@ plt.savefig(savepath + "tuning_curves.png")
 
 plt.figure(figsize = [10, 10])
 net.plot_otc_curve()
-plt.title(network_name + ' model')
 plt.savefig(savepath + "OTC.png")
 
 # plt.figure(figsize = [35, 35])
