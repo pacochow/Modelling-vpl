@@ -925,7 +925,7 @@ class convnet(nn.Module):
                     # Calculate tuning curve parameters after training
 
                     # Set tuning curve at particular orientation, and phase/sf after training
-                    curve = self.results[i, j, :]
+                    curve = self.results[i, sf, j, :]
 
                     # Create list of angles between -pi/2 and pi/2 for units tuned to first and last phases, and between -pi/2 and 3pi/2 for second and third phases
 
@@ -955,6 +955,7 @@ class convnet(nn.Module):
 
                     # While loop to prevent choosing 2 halfmax indices next to each other (check -20 and -5 to prevent edge cases)
                     add = 0
+                    
                     while self.xs[halfmax_index1 - 22] <= self.xs[halfmax_index2 - 20] <= self.xs[halfmax_index1 - 18] or self.xs[halfmax_index1 - 7] <= self.xs[halfmax_index2 - 5] <= self.xs[halfmax_index1 - 3]:
                         temporary = torch.cat([temporary[0:halfmax_index2], temporary[halfmax_index2+1:]])
                         halfmax_index2 = self.find_nearest(temporary, halfmax)
@@ -975,7 +976,7 @@ class convnet(nn.Module):
                     # Calculate tuning curve parameters before training
 
                     # Set tuning curve at particular orientation, and phase/sf before training
-                    initial_params = self.initial_tuning_curves[i, j, :]
+                    initial_params = self.initial_tuning_curves[i, sf, j, :]
 
                     # Measure amplitude using max and min of tuning curve
                     amplitude2 = initial_params.max() - initial_params.min()
@@ -1184,6 +1185,9 @@ class convnet(nn.Module):
             trained_index2 = self.find_nearest(torch.tensor(x), trained_angle2)
 
             for sf in range(self.sfs):
+                if sf == 1:
+                    # Skipping this because these are broadly tuned
+                    continue
                 for j in range(self.phis):
 
                     # Set V1 tuning curve at particular orientation, and phase/sf after and before training
@@ -1213,7 +1217,7 @@ class convnet(nn.Module):
                         after_ranges.append(x[after_preferred_orientation] - x[trained_index1])
 
                         # Calculate slope at trained angle
-                        after_slope = (curve[trained_index1 + 1] - curve[trained_index1 - 1])/(2 * 180/self.tuning_curve_sample)
+                        after_slope = (curve[trained_index1 + 1] - curve[trained_index1 - 1])/(x[trained_index1 + 1] - x[trained_index1 - 1])
 
 
                     else:
@@ -1221,22 +1225,21 @@ class convnet(nn.Module):
                         after_ranges.append(x[after_preferred_orientation] - x[trained_index2])
 
                         # Calculate slope at trained angle
-                        after_slope = (curve[trained_index2 + 1] - curve[trained_index2 - 1])/(2 * 180/self.tuning_curve_sample)
-
+                        after_slope = (curve[trained_index2 + 1] - curve[trained_index2 - 1])/(x[trained_index2 + 1] - x[trained_index2 - 1])
 
                     if x[before_preferred_orientation] <= 0:    
                         # Calculate difference between preferred orientation and trained angle
                         before_ranges.append(x[before_preferred_orientation] - x[trained_index1])
 
                         # Calculate slope at trained angle
-                        before_slope = (initial[trained_index1 + 1] - initial[trained_index1 - 1])/(2 * 180/self.tuning_curve_sample)
+                        before_slope = (initial[trained_index1 + 1] - initial[trained_index1 - 1])/(x[trained_index1 + 1] - x[trained_index1 - 1])
 
                     else:
                         # Calculate difference between preferred orientation and trained angle
                         before_ranges.append(x[before_preferred_orientation] - x[trained_index2])
 
                         # Calculate slope at trained angle
-                        before_slope = (initial[trained_index2 + 1] - initial[trained_index2 - 1])/(2 * 180/self.tuning_curve_sample)
+                        before_slope = (initial[trained_index2 + 1] - initial[trained_index2 - 1])/(x[trained_index2 + 1] - x[trained_index2 - 1])
 
                     after_slopes.append(torch.abs(after_slope).item())
                     before_slopes.append(torch.abs(before_slope).item())
@@ -1264,6 +1267,13 @@ class convnet(nn.Module):
         self.v4_after_range = []
         self.v4_before_range = []
         
+        x = np.linspace(-np.pi/2, np.pi/2, self.tuning_curve_sample)
+        x = x * 180 / np.pi
+        
+        # Find index closest to trained angle
+        trained_index1 = self.find_nearest(torch.tensor(x), trained_angle1)
+        trained_index2 = self.find_nearest(torch.tensor(x), trained_angle2)
+        
         for k in range(self.v4_orientation_number):
             
             # Set V4 tuning curve at particular orientation after and before training
@@ -1279,22 +1289,34 @@ class convnet(nn.Module):
                     
                 # Calculate difference between preferred orientation and trained angle
                 self.v4_after_range.append(x[after_preferred_orientation] - x[trained_index1])
-                self.v4_before_range.append(x[before_preferred_orientation] - x[trained_index1])
-
-
+                
                 # Calculate slope at trained angle
-                after_slope = (curve[trained_index1 + 1] - curve[trained_index1 - 1])/(2 * 180/self.tuning_curve_sample)
-                before_slope = (initial[trained_index1 + 1] - initial[trained_index1 - 1])/(2 * 180/self.tuning_curve_sample)
-
+                after_slope = (curve[trained_index1 + 1] - curve[trained_index1 - 1])/(x[trained_index1 + 1] - x[trained_index1 - 1])
 
             else:
                 # Calculate difference between preferred orientation and trained angle
                 self.v4_after_range.append(x[after_preferred_orientation] - x[trained_index2])
-                self.v4_before_range.append(x[before_preferred_orientation] - x[trained_index2])
+                
 
                 # Calculate slope at trained angle
-                after_slope = (curve[trained_index2 + 1] - curve[trained_index2 - 1])/(2 * 180/self.tuning_curve_sample)
-                before_slope = (initial[trained_index2 + 1] - initial[trained_index2 - 1])/(2 * 180/self.tuning_curve_sample)
+                after_slope = (curve[trained_index2 + 1] - curve[trained_index2 - 1])/(x[trained_index2 + 1] - x[trained_index2 - 1])
+                
+                
+            if x[before_preferred_orientation] <= 0:
+                
+                # Calculate difference between preferred orientation and trained angle
+                self.v4_before_range.append(x[before_preferred_orientation] - x[trained_index1])
+                
+                
+                # Calculate slope at trained angle
+                before_slope = (initial[trained_index1 + 1] - initial[trained_index1 - 1])/(x[trained_index1 + 1] - x[trained_index1 - 1])
+                
+            else:
+                # Calculate difference between preferred orientation and trained angle
+                self.v4_before_range.append(x[before_preferred_orientation] - x[trained_index2])
+                
+                # Calculate slope at trained angle
+                before_slope = (initial[trained_index2 + 1] - initial[trained_index2 - 1])/(x[trained_index2 + 1] - x[trained_index2 - 1])
 
             self.v4_after_slopes.append(torch.abs(after_slope).item())
             self.v4_before_slopes.append(torch.abs(before_slope).item())
@@ -1458,8 +1480,8 @@ class convnet(nn.Module):
         errors = []
         distances = []
         
-        grid_score = torch.empty(self.v1_dimensions, self.v1_dimensions)
-        grid_error = torch.empty(self.v1_dimensions, self.v1_dimensions)
+        self.grid_score = torch.empty(self.v1_dimensions, self.v1_dimensions)
+        self.grid_error = torch.empty(self.v1_dimensions, self.v1_dimensions)
         
         # For each location on x and y axis, calculate transfer performance and error
         for i in tqdm(range(self.v1_dimensions)):
@@ -1472,12 +1494,12 @@ class convnet(nn.Module):
                 distance = np.sqrt(((i - self.train_x_location) ** 2) + ((j - self.train_y_location) ** 2))
                 distances.append(distance)
                 
-                grid_score[i][j] = score
-                grid_error[i][j] = torch.tensor(error)
+                self.grid_score[i][j] = score
+                self.grid_error[i][j] = torch.tensor(error)
                 
         # Plot results
         if performance == True and grid == True:
-            plt.imshow(grid_score, cmap = 'PiYG', vmin = 0, vmax = 100)
+            plt.imshow(self.grid_score, cmap = 'PiYG', vmin = 0, vmax = 100)
             plt.colorbar(label = 'Performance (%)')
             plt.title("Heat map of performance at different untrained locations")
         
@@ -1490,7 +1512,7 @@ class convnet(nn.Module):
             plt.title("Performance on untrained locations")
         
         if performance == False and grid == True:
-            plt.imshow(grid_error, cmap = 'PiYG', vmin = 0, vmax = 1)
+            plt.imshow(self.grid_error, cmap = 'PiYG', vmin = 0, vmax = 1)
             plt.colorbar(label = 'Error')
             plt.title("Heat map of error at different untrained locations")
         
