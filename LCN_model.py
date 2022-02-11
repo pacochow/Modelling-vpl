@@ -807,15 +807,15 @@ class LCN(nn.Module):
         
         # Ensure orientation is between 0 and v1_orientation_number
         if not 0 <= orientation <= self.v1_orientation_number - 1:
-            return("position needs to be between 0 and " + str(self.v1_orientation_number - 1))
+            return("orientation needs to be between 0 and " + str(self.v1_orientation_number - 1))
         
         # Ensure phi is between 0 and phis
         if not 0 <= phi <= self.phis - 1:
-            return("position needs to be between 0 and " + str(self.phis - 1))
+            return("phase needs to be between 0 and " + str(self.phis - 1))
         
         # Ensure sf is between 0 and phisfss
         if not 0 <= sf <= self.sfs - 1:
-            return("position needs to be between 0 and " + str(self.sfs - 1))
+            return("sf needs to be between 0 and " + str(self.sfs - 1))
         
         # Ensure position is between 0 and v1_dimensions
         if not 0 <= position <= self.v1_dimensions - 1:
@@ -1087,9 +1087,13 @@ class LCN(nn.Module):
 
         self.after_amplitudes = []
         self.after_bandwidths = []
+        self.after_baseliness = []
+        self.after_pos = []
         
         self.before_amplitudes = []
         self.before_bandwidths = []
+        self.after_baseliness = []
+        selfl.before_po = []
         
         self.xs = [i for i in range(self.tuning_curve_sample)]
         
@@ -1123,7 +1127,14 @@ class LCN(nn.Module):
                     x = np.linspace(a, b, self.tuning_curve_sample)
                     x = (x * 180) / np.pi
 
-
+                    # Measure baseline using min of tuning curve
+                    baseline = curve.min()
+                    self.after_baseliness.append(baseline)
+                    
+                    # Measure preferred orientation of tuning curve
+                    after_preferred_orientation = curve.argmax().item()   
+                    self.after_pos.append(x[after_preferred orientation])
+                    
                     # Measure amplitude using max and min of tuning curve
                     amplitude = curve.max() - curve.min()
                     self.after_amplitudes.append(amplitude)
@@ -1158,11 +1169,20 @@ class LCN(nn.Module):
                         bandwidth = ((b-a)*180/np.pi) - np.abs(x[halfmax_index1] - x[halfmax_index2])
                     self.after_bandwidths.append(bandwidth/2)
 
+                    
                     # Calculate tuning curve parameters before training
 
                     # Set tuning curve at particular orientation, phase/sf and position before training
                     initial_params = self.initial_tuning_curves[i, sf, j, position, position, :]
 
+                    # Measure baseline using min of tuning curve
+                    baseline = initial_params.min()
+                    self.after_baseliness.append(baseline)
+                    
+                    # Measure preferred orientation of tuning curve
+                    before_preferred_orientation = initial_params.argmax().item()   
+                    self.before_pos.append(x[before_preferred_orientation])
+                    
                     # Measure amplitude using max and min of tuning curve
                     amplitude2 = initial_params.max() - initial_params.min()
                     self.before_amplitudes.append(amplitude2)
@@ -1231,9 +1251,13 @@ class LCN(nn.Module):
         x = (x * 180) / np.pi
         self.after_amplitudes = []
         self.after_bandwidths = []
+        self.after_baselines = []
+        self.after_pos = []
         
         self.before_amplitudes = []
         self.before_bandwidths = []
+        self.before_baselines = []
+        self.before_pos = []
         
         angles = np.linspace(-np.pi/2 + np.pi/(2 * self.v4_orientation_number), np.pi/2 - np.pi/(2 * self.v4_orientation_number), self.v4_orientation_number)
         threshold1 = self.angle1 - np.pi/4
@@ -1250,6 +1274,14 @@ class LCN(nn.Module):
                 
             # Set tuning curve at particular orientation and position after training
             curve = self.v4_results[i, position, position, :]
+            
+            # Measure baseline using min of tuning curve
+            baseline = curve.min()
+            self.after_baseliness.append(baseline)
+
+            # Measure preferred orientation of tuning curve
+            after_preferred_orientation = curve.argmax().item()   
+            self.after_pos.append(x[after_preferred orientation])
             
             # Measure amplitude using max and min of tuning curve
             amplitude = curve.max() - curve.min()
@@ -1289,6 +1321,14 @@ class LCN(nn.Module):
 
             # Set tuning curve at particular orientation and position before training
             initial_params = self.v4_initial_tuning_curves[i, position, position, :]
+            
+            # Measure baseline using min of tuning curve
+            baseline = initial_params.min()
+            self.after_baseliness.append(baseline)
+
+            # Measure preferred orientation of tuning curve
+            before_preferred_orientation = initial_params.argmax().item()   
+            self.before_pos.append(x[before_preferred_orientation])
             
             # Measure amplitude using max and min of tuning curve
             amplitude2 = initial_params.max() - initial_params.min()
@@ -1376,6 +1416,9 @@ class LCN(nn.Module):
             before_ranges = []
 
             for sf in range(self.sfs):
+                if sf == 1:
+                    # Skipping this because these are broadly tuned
+                    continue
                 for j in range(self.phis):
 
                     # Set V1 tuning curve at particular orientation, phase/sf and position after and before training
@@ -1405,14 +1448,14 @@ class LCN(nn.Module):
                         # Calculate difference between preferred orientation and trained angle
                         after_ranges.append(x[after_preferred_orientation] - x[trained_index1])
                         # Calculate slope at trained angle
-                        after_slope = (curve[trained_index1 + 1] - curve[trained_index1 - 1])/(2 * 180/self.tuning_curve_sample)
+                        after_slope = (curve[trained_index1 + 1] - curve[trained_index1 - 1])/(x[trained_index1 + 1] - x[trained_index1 - 1])
 
 
                     else:
                         # Calculate difference between preferred orientation and trained angle
                         after_ranges.append(x[after_preferred_orientation] - x[trained_index2])
                         # Calculate slope at trained angle
-                        after_slope = (curve[trained_index2 + 1] - curve[trained_index2 - 1])/(2 * 180/self.tuning_curve_sample)
+                        after_slope = (curve[trained_index2 + 1] - curve[trained_index2 - 1])/(x[trained_index2 + 1] - x[trained_index2 - 1])
 
 
                     if x[before_preferred_orientation] <= 0:    
@@ -1420,17 +1463,18 @@ class LCN(nn.Module):
                         before_ranges.append(x[before_preferred_orientation] - x[trained_index1])
 
                         # Calculate slope at trained angle
-                        before_slope = (initial[trained_index1 + 1] - initial[trained_index1 - 1])/(2 * 180/self.tuning_curve_sample)
+                        before_slope = (initial[trained_index1 + 1] - initial[trained_index1 - 1])/(x[trained_index1 + 1] - x[trained_index1 - 1])
 
                     else:
                         # Calculate difference between preferred orientation and trained angle
                         before_ranges.append(x[before_preferred_orientation] - x[trained_index2])
 
                         # Calculate slope at trained angle
-                        before_slope = (initial[trained_index2 + 1] - initial[trained_index2 - 1])/(2 * 180/self.tuning_curve_sample)
+                        before_slope = (initial[trained_index2 + 1] - initial[trained_index2 - 1])/(x[trained_index2 + 1] - x[trained_index2 - 1])
 
                     after_slopes.append(torch.abs(after_slope).item())
                     before_slopes.append(torch.abs(before_slope).item())
+
                 
             # Calculate mean difference between preferred orientation and trained angle of all tuning curves selective for particular orientation but different phase/sfs
             mean_after_range = np.mean(after_ranges)
@@ -1455,7 +1499,15 @@ class LCN(nn.Module):
         self.v4_after_range = []
         self.v4_before_range = []
         
+        x = np.linspace(-np.pi/2, np.pi/2, self.tuning_curve_sample)
+        x = x * 180 / np.pi
+        
+        # Find index closest to trained angle
+        trained_index1 = self.find_nearest(torch.tensor(x), trained_angle1)
+        trained_index2 = self.find_nearest(torch.tensor(x), trained_angle2)
+        
         for k in range(self.v4_orientation_number):
+            
             
             # Set V4 tuning curve at particular orientation and position after and before training
             curve = self.v4_results[k, v4_position_1, v4_position_2, :]
@@ -1470,23 +1522,35 @@ class LCN(nn.Module):
                     
                 # Calculate difference between preferred orientation and trained angle
                 self.v4_after_range.append(x[after_preferred_orientation] - x[trained_index1])
-                self.v4_before_range.append(x[before_preferred_orientation] - x[trained_index1])
-
-
+                
                 # Calculate slope at trained angle
-                after_slope = (curve[trained_index1 + 1] - curve[trained_index1 - 1])/(2 * 180/self.tuning_curve_sample)
-                before_slope = (initial[trained_index1 + 1] - initial[trained_index1 - 1])/(2 * 180/self.tuning_curve_sample)
-
+                after_slope = (curve[trained_index1 + 1] - curve[trained_index1 - 1])/(x[trained_index1 + 1] - x[trained_index1 - 1])
 
             else:
                 # Calculate difference between preferred orientation and trained angle
                 self.v4_after_range.append(x[after_preferred_orientation] - x[trained_index2])
-                self.v4_before_range.append(x[before_preferred_orientation] - x[trained_index2])
+                
 
                 # Calculate slope at trained angle
-                after_slope = (curve[trained_index2 + 1] - curve[trained_index2 - 1])/(2 * 180/self.tuning_curve_sample)
-                before_slope = (initial[trained_index2 + 1] - initial[trained_index2 - 1])/(2 * 180/self.tuning_curve_sample)
-
+                after_slope = (curve[trained_index2 + 1] - curve[trained_index2 - 1])/(x[trained_index2 + 1] - x[trained_index2 - 1])
+                
+                
+            if x[before_preferred_orientation] <= 0:
+                
+                # Calculate difference between preferred orientation and trained angle
+                self.v4_before_range.append(x[before_preferred_orientation] - x[trained_index1])
+                
+                
+                # Calculate slope at trained angle
+                before_slope = (initial[trained_index1 + 1] - initial[trained_index1 - 1])/(x[trained_index1 + 1] - x[trained_index1 - 1])
+                
+            else:
+                # Calculate difference between preferred orientation and trained angle
+                self.v4_before_range.append(x[before_preferred_orientation] - x[trained_index2])
+                
+                # Calculate slope at trained angle
+                before_slope = (initial[trained_index2 + 1] - initial[trained_index2 - 1])/(x[trained_index2 + 1] - x[trained_index2 - 1])
+                
             self.v4_after_slopes.append(torch.abs(after_slope).item())
             self.v4_before_slopes.append(torch.abs(before_slope).item())
             
@@ -1649,8 +1713,8 @@ class LCN(nn.Module):
         errors = []
         distances = []
         
-        grid_score = torch.empty(self.v1_dimensions, self.v1_dimensions)
-        grid_error = torch.empty(self.v1_dimensions, self.v1_dimensions)
+        self.grid_score = torch.empty(self.v1_dimensions, self.v1_dimensions)
+        self.grid_error = torch.empty(self.v1_dimensions, self.v1_dimensions)
         
         # For each location on x and y axis, calculate transfer performance and error
         for i in tqdm(range(self.v1_dimensions)):
@@ -1663,12 +1727,12 @@ class LCN(nn.Module):
                 distance = np.sqrt(((i - self.train_x_location) ** 2) + ((j - self.train_y_location) ** 2))
                 distances.append(distance)
                 
-                grid_score[i][j] = score
-                grid_error[i][j] = torch.tensor(error)
+                self.grid_score[i][j] = score
+                self.grid_error[i][j] = torch.tensor(error)
                 
         # Plot results
         if performance == True and grid == True:
-            plt.imshow(grid_score, cmap = 'PiYG', vmin = 0, vmax = 100)
+            plt.imshow(self.grid_score, cmap = 'PiYG', vmin = 0, vmax = 100)
             plt.colorbar(label = 'Performance (%)')
             plt.title("Heat map of performance at different untrained locations")
         
@@ -1681,7 +1745,7 @@ class LCN(nn.Module):
             plt.title("Performance on untrained locations")
         
         if performance == False and grid == True:
-            plt.imshow(grid_error, cmap = 'PiYG', vmin = 0, vmax = 1)
+            plt.imshow(self.grid_error, cmap = 'PiYG', vmin = 0, vmax = 1)
             plt.colorbar(label = 'error')
             plt.title("Heat map of error at different untrained locations")
         
@@ -1692,135 +1756,6 @@ class LCN(nn.Module):
             plt.xlabel("Distance from trained angle")
             plt.ylabel("Error")
             plt.title("Error on untrained locations")
-    
-    def sf_tuning_curve(self):
-        
-        # Create list of angles between -pi/2 and pi/2 to generate tuning curves
-        self.tuning_curve_sample = 100
-        x = np.linspace(0.1, 10, self.tuning_curve_sample)
-        
-        # Initialise tensor for all tuning curves after training, organized into orientations, phase/sfs, horizontal position, vertical position, tuning curve data
-        self.sf_results = torch.empty(self.v1_orientation_number, self.phis, self.v1_dimensions, self.v1_dimensions, len(x))
-        
-        # Initialise tensor for all tuning curves before training
-        self.initial_sf_tuning_curves = torch.empty(
-            self.v1_orientation_number, self.phis, self.v1_dimensions, self.v1_dimensions, len(x))
-        
-        
-        # Create gabor at each orientation and store measured activity of each V1 gabor filter in tensor
-        with torch.no_grad():
-            for i in tqdm(range(len(x))):
-                for orientation in range(self.v1_orientation_number):
-                    for phi in range(self.phis):
-                        for horizontal in range(len(self.simple_weight[0][self.phis * orientation + phi][0])):
-                            for vertical in range(
-                                len(self.simple_weight[0][self.phis * orientation + phi][0][horizontal])):
-                                
-                                # Create gabor
-                                test = self.generate_gabor(self.v1_size, 0, self.phis_range[phi], x[i]).view(
-                                    self.v1_size, self.v1_size)#.to(self.device)
-                                
-                                # Present to specific gabor after training
-                                result = torch.sum(
-                                    self.simple_weight[0][self.phis * orientation + phi][0][horizontal][vertical].view(
-                                        self.v1_size, self.v1_size) * test)
-                                
-                                # Present to specific gabor before training
-                                initial_result = torch.sum(
-                                    self.before_v1weight[0][self.phis * orientation + phi][0][horizontal][vertical].view(
-                                        self.v1_size, self.v1_size) * test)
-                                
-                                # Save activity in tensor
-                                self.sf_results[orientation][phi][horizontal][vertical][i] = result 
-                                self.initial_sf_tuning_curves[orientation][phi][horizontal][vertical][i] = initial_result 
-                                
-            # Normalize tuning curves
-            self.sf_results = self.sf_results / self.initial_sf_tuning_curves.max()
-            self.initial_sf_tuning_curves = self.initial_sf_tuning_curves / self.initial_sf_tuning_curves.max()
-                        
-    def plot_sf_tuning_curve(self, orientation, phi_sf, position, orientations = False, phi_sfs = False, differences = False):
-        
-        """
-        Plot tuning curves at a particular orientation index or phase/spatial frequeny index and at a particular 
-        filter position. Setting orientations = True plots tuning curves at all orientations at a specified phase/
-        spatial frequency. Setting phi_sfs = True plots tuning curves at all phases/spatial frequencies (determined
-        during network initialization) at a specified orientation. Setting differences = True plots difference in
-        responses using initial V1 simple cell weights and trained weights. 
-        """
-        
-        # Ensure orientation is between 0 and v1_orientation_number
-        if not 0 <= orientation <= self.v1_orientation_number - 1:
-            return("position needs to be between 0 and " + str(self.v1_orientation_number - 1))
-        
-        # Ensure phi is between 0 and phis
-        if not 0 <= phi_sf <= self.phis - 1:
-            return("position needs to be between 0 and " + str(self.phis - 1))
-        
-        # Ensure position is between 0 and v1_dimensions
-        if not 0 <= position <= self.v1_dimensions - 1:
-            return("position needs to be between 0 and " + str(self.v1_dimensions - 1))
-        
-        # Create list of angles between -pi/2 and pi/2
-        x = np.linspace(0.1, 10, self.tuning_curve_sample)
-        
-        if orientations == True and differences == False:
-            
-            # Plot each tuning curve at different orientations with specified phase/sf and position
-            for i in range(self.v1_orientation_number):
-                plt.plot(x, self.sf_results[i, phi_sf, position, position, :])
-            
-            # Create legend
-            plt.legend([round(self.v1_angles[i] * 180 / np.pi, 1) for i in range(self.v1_orientation_number)], loc = 'right')
-            
-            plt.ylabel("Response")
-            plt.title("V1 tuning curves selective for different orientations", loc = 'center')
-                
-        if phi_sfs == True and differences == False:
-            
-            # Plot each tuning curve at different phase/sfs with specified orientation and position
-            for i in range(self.phis):
-                plt.plot(x, self.sf_results[orientation, i, position, position, :])
-            
-            # Create legend
-            ranges = np.linspace(self.phis_range[0], self.phis_range[-1], self.phis)
-            plt.legend([round(ranges[i], 1) for i in range(self.phis)])
-            
-            plt.ylabel("Response")
-            plt.title("V1 tuning curves selective for different phase/SFs", loc = 'center');
-            
-        if orientations == True and differences == True:
-            
-            # Calculate difference in tuning curves before and after training
-            difference = self.sf_results - self.initial_sf_tuning_curves
-            
-            # Plot each difference in tuning curve at different orientations with specified phase/sf and position
-            for i in range(self.v1_orientation_number):
-                plt.plot(x, difference[i, phi_sf, position, position, :])
-            
-            # Create legend
-            plt.legend([round(self.v1_angles[i] * 180 / np.pi, 1) for i in range(self.v1_orientation_number)])
-            
-            plt.ylabel("Difference in response")
-            plt.title("Difference in V1 tuning curves selective for different orientations", loc = 'center');
-            
-        
-        if phi_sfs == True and differences == True:
-            
-            # Calculate difference in tuning curves before and after training
-            difference = self.sf_results - self.initial_sf_tuning_curves
-            
-            # Plot each difference in tuning curve at different phase/sfs with specified orientation and position
-            for i in range(self.phis):
-                plt.plot(x, difference[orientation, i, position, position, :])
-
-            # Create legend
-            ranges = np.linspace(self.phis_range[0], self.phis_range[-1], self.phis)
-            plt.legend([round(ranges[i], 1) for i in range(self.phis)])
-            
-            plt.ylabel("Difference in response")
-            plt.title("Difference in V1 tuning curves selective for different phase/SFs", loc = 'center');
-        
-        plt.xlabel("SF (wavelength)")
     
     # Helper functions
     
