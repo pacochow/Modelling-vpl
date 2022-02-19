@@ -165,7 +165,7 @@ class convnet(nn.Module):
         self.labels = []
         self.inputs = []
         
-        self.trained_phis = np.linspace(0, np.pi, 10) # Use phases regularly spaced across 0 to pi
+        self.trained_phis = np.linspace(0, np.pi, self.phis) # Use phases regularly spaced across 0 to pi
         self.trained_sfs = []
     
         self.angle1 = angle1
@@ -181,9 +181,11 @@ class convnet(nn.Module):
             for sf in sfs:
                 for i in range(int(self.training_size/(2*len(sfs)))):
                     theta = angle
-                    phi = self.trained_phis[i]
-                    kernel = self.generate_gabor(self.input_size, theta, phi, 5) 
+                    phi = self.trained_phis[i % len(self.trained_phis)]
+                    kernel = self.generate_gabor(self.input_size, theta, phi, sf) 
+                    self.trained_sfs.append(self.lamda)
                     self.inputs.append(kernel)
+
 
                     # Label stimulus as 0 if it is clockwise to reference orientation of 0 and 1 if counterclockwise
                     if 0 < theta < np.pi/2: 
@@ -221,24 +223,30 @@ class convnet(nn.Module):
         self.train_x_location = x_location
         self.train_y_location = y_location
         
-        self.trained_phis = np.linspace(0, np.pi, 10) # Use phases regularly spaced across 0 to pi
+        self.trained_phis = np.linspace(0, np.pi, self.phis) # Use phases regularly spaced across 0 to pi
         self.trained_sfs = []
+        
+        if random_sf == True:
+            sfs = [5, 9]
+        else:
+            sfs = [5]
 
         # For each orientation, create input gabor stimulus at that orientation at particular location
         for angle in [angle1, angle2]:
-            for i in range(int(self.training_size/2)):
-                theta = angle
-                phi = self.trained_phis[i]
-                kernel = self.generate_location_gabor(theta, phi, 5, x_location, y_location)
-                self.trained_sfs.append(self.lamda)
-                self.inputs.append(kernel)
+            for sf in sfs:
+                for i in range(int(self.training_size/(2*len(sfs)))):
+                    theta = angle
+                    phi = self.trained_phis[i % len(self.trained_phis)]
+                    kernel = self.generate_location_gabor(theta, phi, sf, x_location, y_location)
+                    self.trained_sfs.append(self.lamda)
+                    self.inputs.append(kernel)
 
-                # Label stimulus as 0 if it is clockwise to reference orientation of 0 and 1 if counterclockwise
-                if 0 < theta < np.pi/2: 
-                    label = torch.tensor([0])
-                else:
-                    label = torch.tensor([1])
-                self.labels.append(label)
+                    # Label stimulus as 0 if it is clockwise to reference orientation of 0 and 1 if counterclockwise
+                    if 0 < theta < np.pi/2: 
+                        label = torch.tensor([0])
+                    else:
+                        label = torch.tensor([1])
+                    self.labels.append(label)
             
         # Stack all input gabor stimuli into one tensor
         self.input = torch.stack(self.inputs).view(self.training_size, 1, self.input_size, self.input_size)#.to(self.device) 
@@ -291,11 +299,12 @@ class convnet(nn.Module):
             
         # V4 cell convolution
         out = self.v4_weight(sf_pools).view(1, self.v4_orientation_number * self.v4_dimensions * self.v4_dimensions)
-        
+        out = F.relu(out)
 
         
         # Feed flattened activation maps into decision layer
         out = self.decision(out)
+        out = F.softmax(out, dim = 1)
 
         return out
 
@@ -616,7 +625,7 @@ class convnet(nn.Module):
                                 x = np.linspace(-np.pi/2, 3*np.pi/2, self.tuning_curve_sample)
                             
                             # Create gabor
-                            test = self.generate_gabor(self.v1_size, x[i], self.phis_range[phi], 5).view(
+                            test = self.generate_gabor(self.v1_size, x[i], self.phis_range[phi], self.sfs_range[sf]).view(
                                 self.v1_size, self.v1_size)#.to(self.device)
 
                             # Present to specific gabor after training
@@ -1185,9 +1194,9 @@ class convnet(nn.Module):
             trained_index2 = self.find_nearest(torch.tensor(x), trained_angle2)
 
             for sf in range(self.sfs):
-                if sf == 1:
-                    # Skipping this because these are broadly tuned
-                    continue
+#                 if sf == 1:
+#                     # Skipping this because these are broadly tuned
+#                     continue
                 for j in range(self.phis):
 
                     # Set V1 tuning curve at particular orientation, and phase/sf after and before training
