@@ -181,7 +181,7 @@ class LCN(nn.Module):
         self.labels = []
         self.inputs = []
         
-        self.trained_phis = np.linspace(0, np.pi, 10) # Use phases regularly spaced across 0 to pi
+        self.trained_phis = np.linspace(0, np.pi, self.phis) # Use phases regularly spaced across 0 to pi
         self.trained_sfs = []
     
         self.angle1 = angle1
@@ -197,7 +197,7 @@ class LCN(nn.Module):
             for sf in sfs:
                 for i in range(int(self.training_size/(2*len(sfs)))):
                     theta = angle
-                    phi = self.trained_phis[i]
+                    phi = self.trained_phis[i % len(self.trained_phis)]
                     kernel = self.generate_gabor(self.input_size, theta, phi, sf) 
                     self.trained_sfs.append(self.lamda)
                     self.inputs.append(kernel)
@@ -238,7 +238,7 @@ class LCN(nn.Module):
         self.train_x_location = x_location
         self.train_y_location = y_location
         
-        self.trained_phis = np.linspace(0, np.pi, 10) # Use phases regularly spaced across 0 to pi
+        self.trained_phis = np.linspace(0, np.pi, self.phis) # Use phases regularly spaced across 0 to pi
         self.trained_sfs = []
 
         if random_sf == True:
@@ -251,7 +251,7 @@ class LCN(nn.Module):
             for sf in sfs:
                 for i in range(int(self.training_size/(2*len(sfs)))):
                     theta = angle
-                    phi = self.trained_phis[i]
+                    phi = self.trained_phis[i % len(self.trained_phis)]
                     kernel = self.generate_location_gabor(theta, phi, sf, x_location, y_location)
                     self.trained_sfs.append(self.lamda)
                     self.inputs.append(kernel)
@@ -770,7 +770,7 @@ class LCN(nn.Module):
                                         x = np.linspace(-np.pi/2, 3*np.pi/2, self.tuning_curve_sample)
 
                                     # Create gabor
-                                    test = self.generate_gabor(self.v1_size, x[i], self.phis_range[phi], 5).view(
+                                    test = self.generate_gabor(self.v1_size, x[i], self.phis_range[phi], self.sfs_range[sf]).view(
                                         self.v1_size, self.v1_size)#.to(self.device)
 
                                     # Present to specific gabor after training
@@ -1087,13 +1087,13 @@ class LCN(nn.Module):
 
         self.after_amplitudes = []
         self.after_bandwidths = []
-        self.after_baseliness = []
-        self.after_pos = []
+        self.after_baselines = []
+        self.v1_after_pos = []
         
         self.before_amplitudes = []
         self.before_bandwidths = []
-        self.after_baseliness = []
-        selfl.before_po = []
+        self.before_baselines = []
+        self.v1_before_pos = []
         
         self.xs = [i for i in range(self.tuning_curve_sample)]
         
@@ -1129,11 +1129,11 @@ class LCN(nn.Module):
 
                     # Measure baseline using min of tuning curve
                     baseline = curve.min()
-                    self.after_baseliness.append(baseline)
+                    self.after_baselines.append(baseline)
                     
                     # Measure preferred orientation of tuning curve
                     after_preferred_orientation = curve.argmax().item()   
-                    self.after_pos.append(x[after_preferred orientation])
+                    self.v1_after_pos.append(x[after_preferred_orientation])
                     
                     # Measure amplitude using max and min of tuning curve
                     amplitude = curve.max() - curve.min()
@@ -1177,11 +1177,11 @@ class LCN(nn.Module):
 
                     # Measure baseline using min of tuning curve
                     baseline = initial_params.min()
-                    self.after_baseliness.append(baseline)
+                    self.before_baselines.append(baseline)
                     
                     # Measure preferred orientation of tuning curve
                     before_preferred_orientation = initial_params.argmax().item()   
-                    self.before_pos.append(x[before_preferred_orientation])
+                    self.v1_before_pos.append(x[before_preferred_orientation])
                     
                     # Measure amplitude using max and min of tuning curve
                     amplitude2 = initial_params.max() - initial_params.min()
@@ -1230,6 +1230,9 @@ class LCN(nn.Module):
 
         self.v1_mean_before_bandwidth = np.mean(self.before_bandwidths)
         self.v1_std_before_bandwidth = np.std(self.before_bandwidths)
+        
+        self.v1_mean_after_baseline = np.mean(self.after_baselines)
+        self.v1_mean_before_baseline = np.mean(self.before_baselines)
 
         # Calculate percentage differences
         self.v1_amplitude_difference = ((self.v1_mean_after_amplitude - self.v1_mean_before_amplitude) / self.v1_mean_before_amplitude) * 100      
@@ -1252,12 +1255,12 @@ class LCN(nn.Module):
         self.after_amplitudes = []
         self.after_bandwidths = []
         self.after_baselines = []
-        self.after_pos = []
+        self.v4_after_pos = []
         
         self.before_amplitudes = []
         self.before_bandwidths = []
         self.before_baselines = []
-        self.before_pos = []
+        self.v4_before_pos = []
         
         angles = np.linspace(-np.pi/2 + np.pi/(2 * self.v4_orientation_number), np.pi/2 - np.pi/(2 * self.v4_orientation_number), self.v4_orientation_number)
         threshold1 = self.angle1 - np.pi/4
@@ -1277,11 +1280,11 @@ class LCN(nn.Module):
             
             # Measure baseline using min of tuning curve
             baseline = curve.min()
-            self.after_baseliness.append(baseline)
+            self.after_baselines.append(baseline)
 
             # Measure preferred orientation of tuning curve
             after_preferred_orientation = curve.argmax().item()   
-            self.after_pos.append(x[after_preferred orientation])
+            self.v4_after_pos.append(x[after_preferred_orientation])
             
             # Measure amplitude using max and min of tuning curve
             amplitude = curve.max() - curve.min()
@@ -1324,11 +1327,11 @@ class LCN(nn.Module):
             
             # Measure baseline using min of tuning curve
             baseline = initial_params.min()
-            self.after_baseliness.append(baseline)
+            self.before_baselines.append(baseline)
 
             # Measure preferred orientation of tuning curve
             before_preferred_orientation = initial_params.argmax().item()   
-            self.before_pos.append(x[before_preferred_orientation])
+            self.v4_before_pos.append(x[before_preferred_orientation])
             
             # Measure amplitude using max and min of tuning curve
             amplitude2 = initial_params.max() - initial_params.min()
@@ -1377,6 +1380,9 @@ class LCN(nn.Module):
 
         self.v4_mean_before_bandwidth = np.mean(self.before_bandwidths)
         self.v4_std_before_bandwidth = np.std(self.before_bandwidths)
+        
+        self.v4_mean_after_baseline = np.mean(self.after_baselines)
+        self.v4_mean_before_baseline = np.mean(self.before_baselines)
 
         # Calculate percentage differences
         self.v4_amplitude_difference = ((self.v4_mean_after_amplitude - self.v4_mean_before_amplitude) / self.v4_mean_before_amplitude) * 100      
@@ -1416,9 +1422,9 @@ class LCN(nn.Module):
             before_ranges = []
 
             for sf in range(self.sfs):
-                if sf == 1:
-                    # Skipping this because these are broadly tuned
-                    continue
+#                 if sf == 1:
+#                     # Skipping this because these are broadly tuned
+#                     continue
                 for j in range(self.phis):
 
                     # Set V1 tuning curve at particular orientation, phase/sf and position after and before training
