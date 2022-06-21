@@ -25,10 +25,10 @@ scales = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25]
 v1_weight_scales = scales * len(scales)
 phase_weight_scale = 0.01
 v4_weight_scales = [x for item in scales for x in repeat(item, len(scales))]
-# v1_weight_scale = 0.5
-# v4_weight_scale = 2
+# v1_weight_scale = 1.25
+# v4_weight_scale = 2.25
 learning_rate = 0.01
-iterations = 10000
+iterations = 50000
 inp_size = 33
 v1_size = 11
 v1_orientation_number = 32
@@ -36,11 +36,12 @@ v4_size = 11
 v4_stride = 6
 v4_orientation_number = 16
 phis = 4
-training_size = 20
+training_size = 16
 random_sf = False
 
-# v1_gammas = [i/10 for i in range(5, 16)] + [0.5] * 10
-# v4_orientation_stds = [0.7] * 11 + [i/10 for i in range(1, 11)]
+
+# v1_gammas = list(np.linspace(0.5, 1.6, 32)) + [0.5] * 32
+# v4_orientation_stds = [0.7] * 32 + list(np.linspace(0.1, 1, 32))
 v1_gamma = 0.5
 v4_orientation_std = 0.7
 
@@ -51,6 +52,9 @@ v4_weight_scale = v4_weight_scales[int(sys.argv[1]) - 1]
 
 folder_savepath = 'trained_models/conv_high_fixed_normalized/weight_scale_' + str(v1_weight_scale).replace('.', '') + '_001_' + str(v4_weight_scale).replace('.', '') #path to existing directory for saving trained models
 savepath = folder_savepath + '/' 
+
+# folder_savepath = 'trained_models/conv_changing_bandwidths/' + str(round(v1_gamma, 2)).replace('.', '') + '_' + str(round(v4_orientation_std, 2)).replace('.', '')
+# savepath = folder_savepath + '/' 
 
 
 if not funcs.path_exists(folder_savepath):
@@ -93,7 +97,7 @@ while done == False:
     logger.info('Network training complete - {} iterations'.format(iterations))
 
 # SAVE
-torch.save(net.state_dict(),savepath[:-1] + ".pt")
+torch.save(net.state_dict(),savepath + "model.pt")
 torch.save(net.losses,savepath + "loss.pt")
 torch.save(net.training_scores,savepath + "performance.pt")
 torch.save(net.v1_weight_changes,savepath + "v1_weight_change.pt")
@@ -113,6 +117,14 @@ torch.save(net.v1_angles,savepath + "v1_angles.pt")
 
 
 net.otc_curve(v1_position_1 = int((net.v1_dimensions - 1) / 2), v1_position_2 = int((net.v1_dimensions - 1) / 2), v4_position_1 = int((net.v4_dimensions - 1) / 2), v4_position_2 = int((net.v4_dimensions - 1) / 2))
+torch.save(net.v1_before_range, savepath + "v1_before_range.pt")
+torch.save(net.v1_after_range, savepath + "v1_after_range.pt")
+torch.save(net.v4_before_range, savepath + "v4_before_range.pt")
+torch.save(net.v4_after_range, savepath + "v4_after_range.pt")
+torch.save(net.v4_before_slopes, savepath + "v4_before_slopes.pt")
+torch.save(net.v4_after_slopes, savepath + "v4_after_slopes.pt")
+torch.save(net.v1_mean_before_slopes, savepath + "v1_mean_before_slopes.pt")
+torch.save(net.v1_mean_after_slopes, savepath + "v1_mean_after_slopes.pt")
 net.v1_tuning_params()
 net.v4_tuning_params()
 
@@ -133,6 +145,12 @@ logger.info('Model saved to {}'.format(savepath))
 
 # Figures
 
+plt.figure(figsize = [10, 10])
+net.plot_transfer_score(performance = True, grid = True)
+plt.savefig(savepath + "transfer.png")
+torch.save(net.grid_score, savepath + "transfer_performance.pt")
+torch.save(net.grid_error, savepath + "transfer_error.pt")
+
 plt.figure(figsize = [35, 35])
 difference = False
 plt.subplot(3, 3, 1)
@@ -152,10 +170,6 @@ plt.figure(figsize = [10, 10])
 net.plot_otc_curve()
 plt.savefig(savepath + "OTC.png")
 
-# plt.figure(figsize = [35, 35])
-# plt.subplot(3, 3, 1)
-# net.plot_otc_curve()
-# plt.title(network_name + " model OTC")
             
 # plt.subplot(3, 3, 2)
 # net.plot_otc_curve_diff(absolute_diff = False)
