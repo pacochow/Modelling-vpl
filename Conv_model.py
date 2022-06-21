@@ -1194,9 +1194,6 @@ class convnet(nn.Module):
             trained_index2 = self.find_nearest(torch.tensor(x), trained_angle2)
 
             for sf in range(self.sfs):
-#                 if sf == 1:
-#                     # Skipping this because these are broadly tuned
-#                     continue
                 for j in range(self.phis):
 
                     # Set V1 tuning curve at particular orientation, and phase/sf after and before training
@@ -1450,12 +1447,12 @@ class convnet(nn.Module):
         phases = self.trained_phis
         sfs = self.trained_sfs
         for j in range(self.training_size):
-            if j < 10:
+            if j < int(self.training_size/2):
                 angle = self.angle1
 
             else: 
                 angle = self.angle2
-            kernel = self.generate_location_gabor(angle, phases[j // 10], sfs[j // 10], x_location, y_location)
+            kernel = self.generate_location_gabor(angle, phases[j % self.trained_phis], sfs[j], x_location, y_location)
             self.kernels.append(kernel)
         # Label stimulus as 0 if it is clockwise to reference orientation of 0 and 1 if counterclockwise
             if 0 < angle < np.pi/2: 
